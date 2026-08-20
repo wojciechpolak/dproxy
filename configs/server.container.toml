@@ -1,0 +1,24 @@
+# Container defaults. The included Compose deployment publishes no host port;
+# only its ingress container can reach this listener on the Compose network.
+listen = "0.0.0.0:8686"
+identity_file = "/var/lib/dproxy/identity.pem"
+token_file = "/run/secrets/dproxy_token"
+
+doh_url = "https://cloudflare-dns.com/dns-query"
+
+[timeouts]
+dial = "10s"
+tls_handshake = "10s"
+control = "10s"
+idle = "5m"
+max_lifetime = "0s"
+shutdown = "30s"
+
+[limits]
+max_sessions = 64
+max_control_message_bytes = 4096
+
+[log]
+level = "info"
+format = "json"
+include_targets = false

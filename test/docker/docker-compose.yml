@@ -1,0 +1,57 @@
+services:
+  fixture:
+    build:
+      context: ../..
+      dockerfile: test/docker/Dockerfile.fixture
+    image: dproxy-e2e-fixture:local
+    user: "${DPROXY_E2E_UID:-65532}:${DPROXY_E2E_GID:-65532}"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: ${DPROXY_E2E_DIR}
+        target: /run/e2e
+        read_only: true
+    networks:
+      e2e:
+        ipv4_address: 9.9.9.2
+
+  dproxy:
+    build:
+      context: ../..
+    image: dproxy:local
+    user: "${DPROXY_E2E_UID:-65532}:${DPROXY_E2E_GID:-65532}"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - server
+      - --config
+      - /run/e2e/server.toml
+    volumes:
+      - type: bind
+        source: ${DPROXY_E2E_DIR}
+        target: /run/e2e
+        read_only: true
+      - type: bind
+        source: ${DPROXY_E2E_DIR}/ca.pem
+        target: /etc/ssl/certs/ca-certificates.crt
+        read_only: true
+    ports:
+      - "127.0.0.1:18686:8686"
+    depends_on:
+      - fixture
+    networks:
+      e2e:
+        ipv4_address: 9.9.9.3
+
+networks:
+  e2e:
+    ipam:
+      config:
+        - subnet: 9.9.9.0/29

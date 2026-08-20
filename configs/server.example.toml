@@ -1,0 +1,35 @@
+# dproxy server configuration.
+#
+# The remote enforces the destination policy independently of the client and
+# never trusts the client's decision. An unknown key is a startup error.
+
+listen        = "127.0.0.1:8686"             # reached through private ingress
+token_file    = "/run/secrets/dproxy-token"  # mode 0600, at least 32 bytes
+identity_file = "/var/lib/dproxy/identity.pem" # generated once with mode 0600
+doh_url       = "https://cloudflare-dns.com/dns-query"
+
+# Addresses for the resolver itself; required for any endpoint other than the
+# shipped one, because dproxy never asks the operating system resolver.
+# doh_bootstrap = ["1.1.1.1", "1.0.0.1"]
+
+# With neither setting, the server permits every public hostname on port 443.
+# Configure the same restriction here and on the client when you need one.
+# allowlist_file = "/etc/dproxy/allowlist"
+# allowlist = ["api.openai.com", "*.openai.com", "api.anthropic.com"]
+
+[timeouts]
+dial          = "10s"
+tls_handshake = "10s"
+control       = "10s"
+idle          = "5m"
+max_lifetime  = "0s"
+shutdown      = "30s"
+
+[limits]
+max_sessions              = 64
+max_control_message_bytes = 4096
+
+[log]
+level           = "info"
+format          = "text"
+include_targets = false

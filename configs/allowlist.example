@@ -1,0 +1,26 @@
+# Optional OpenAI and Anthropic allowlist — one pattern per line.
+#
+# Syntax:
+#   example.com     exact hostname match (case-insensitive, IDNA/A-label form)
+#   *.example.com   one or more labels in place of the star; does NOT match
+#                   the bare "example.com" — list that separately if wanted
+#
+# Blank lines and lines starting with "#" are ignored.
+# Ports are not part of a pattern: v1 permits port 443 only.
+# IP literals are never permitted, in a pattern or in a CONNECT request.
+
+# OpenAI / Codex
+api.openai.com
+*.openai.com
+chatgpt.com
+*.chatgpt.com
+*.oaistatic.com
+*.oaiusercontent.com
+
+# Anthropic / Claude Code
+api.anthropic.com
+*.anthropic.com
+claude.ai
+*.claude.ai
+claude.com
+*.claude.com

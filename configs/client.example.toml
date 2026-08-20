@@ -1,0 +1,46 @@
+# dproxy client configuration.
+#
+# Every setting here can also be given as a flag; a flag that is explicitly
+# passed overrides this file. An unknown key is a startup error, so a
+# misspelled setting fails loudly instead of being ignored.
+
+listen     = "127.0.0.1:18080"                    # loopback only, always
+server     = "wss://dproxy.example.com/v1/tunnel"
+server_pin = "sha256:REPLACE_WITH_THE_REMOTE_SPKI_DIGEST"
+# token_file defaults to $XDG_CONFIG_HOME/dproxy/token or ~/.config/dproxy/token.
+# token_file = "/path/to/dproxy/token"            # mode 0600, at least 32 bytes
+doh_url    = "https://cloudflare-dns.com/dns-query"
+
+# The addresses the resolver itself is dialed at. Resolving the resolver's own
+# name is the one lookup DoH cannot perform, and asking the operating system
+# for it would emit exactly the plaintext query dproxy exists to avoid. The
+# shipped Cloudflare DoH endpoint has these built in; any other endpoint must list
+# its own here, or startup fails.
+# doh_bootstrap = ["1.1.1.1", "1.0.0.1", "2606:4700:4700::1111", "2606:4700:4700::1001"]
+
+# "required" is the only value a deployment should ever carry. The other value
+# is "insecure-disabled", which exposes the outer SNI and exists for local
+# development against endpoints that have no HTTPS RR.
+ech = "required"
+
+# All public hostnames on port 443 are allowed when neither setting is present.
+# Use allowlist_file for a restricted list with comments, or allowlist for a
+# short inline restriction. configs/allowlist.example contains OpenAI and
+# Anthropic entries.
+# allowlist_file = "/path/to/dproxy/allowlist"
+# allowlist = ["api.openai.com", "*.openai.com", "api.anthropic.com"]
+
+[timeouts]
+dial          = "10s"
+tls_handshake = "10s"
+control       = "10s"
+idle          = "5m"   # end a session that has moved no bytes; "0s" disables
+max_lifetime  = "0s"   # unbounded: provider streaming responses are long-lived
+shutdown      = "30s"  # wait for active connections during process shutdown
+
+[log]
+level  = "info"
+format = "text"
+# Recording destination hostnames is a privacy decision, not a verbosity one:
+# raising the level to "debug" does not turn this on.
+include_targets = false

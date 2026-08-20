@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1.18
+
+FROM golang:1.26.6-alpine AS build
+
+WORKDIR /src
+COPY go.mod ./
+COPY internal ./internal
+RUN CGO_ENABLED=0 GOOS=linux go build -tags e2e_fixture \
+    -trimpath -ldflags="-s -w" -o /out/fixture ./internal/integration/fixture
+
+FROM scratch
+
+COPY --from=build --chown=65532:65532 /out/fixture /fixture
+USER 65532:65532
+ENTRYPOINT ["/fixture"]
+CMD ["serve", "/run/e2e"]

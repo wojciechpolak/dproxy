@@ -1,0 +1,53 @@
+services:
+  dproxy:
+    build:
+      context: .
+    image: dproxy:local
+    restart: unless-stopped
+    user: "${DPROXY_UID:-65532}:${DPROXY_GID:-65532}"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: ./secrets/dproxy_token
+        target: /run/secrets/dproxy_token
+        read_only: true
+      - type: bind
+        source: ./state
+        target: /var/lib/dproxy
+    expose:
+      - "8686"
+    networks:
+      - relay
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    user: "${DPROXY_UID:-65532}:${DPROXY_GID:-65532}"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token-file
+      - /run/secrets/cloudflare_tunnel_token
+    volumes:
+      - type: bind
+        source: ./secrets/cloudflare_tunnel_token
+        target: /run/secrets/cloudflare_tunnel_token
+        read_only: true
+    depends_on:
+      - dproxy
+    networks:
+      - relay
+
+networks:
+  relay:
+    driver: bridge

@@ -1,0 +1,13 @@
+# Example for a locally managed Tunnel. The compose file uses a remotely
+# managed Tunnel token instead; configure the equivalent hostname, path, and
+# service in the Cloudflare dashboard.
+tunnel: 00000000-0000-0000-0000-000000000000
+credentials-file: /run/secrets/cloudflared-credentials.json
+
+ingress:
+  - hostname: dproxy.example.com
+    path: ^/v1/tunnel$
+    service: http://dproxy:8686
+    originRequest:
+      http2Origin: false
+  - service: http_status:404
