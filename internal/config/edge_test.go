@@ -132,6 +132,12 @@ func TestAddressAndURLValidationEdgeCases(t *testing.T) {
 	if err := validateDoHBootstrap(mustURL(t, "https://1.1.1.1/dns-query"), nil); err != nil {
 		t.Errorf("IP-literal DoH endpoint needs no bootstrap: %v", err)
 	}
+	if err := validateDoHBootstrap(nil, nil); err == nil {
+		t.Error("missing DoH endpoint was accepted without bootstrap addresses")
+	}
+	if err := validateDoHBootstrap(mustURL(t, "https://dns.example/dns-query"), []netip.Addr{netip.IPv4Unspecified()}); err == nil {
+		t.Error("undialable DoH bootstrap address was accepted")
+	}
 }
 
 func TestTokenSetFileErrorPaths(t *testing.T) {

@@ -29,6 +29,7 @@ func TestTOMLReadsScalars(t *testing.T) {
 listen = "127.0.0.1:18080"
 count  = 42
 flag   = true
+quiet  = false
 
 [log]
 level = 'info'
@@ -38,6 +39,7 @@ level = 'info'
 		level  string
 		count  int
 		flag   bool
+		quiet  bool
 	)
 	if err := document.applyString("listen", &listen); err != nil {
 		t.Fatalf("applyString = %v", err)
@@ -51,8 +53,11 @@ level = 'info'
 	if err := document.applyBool("flag", &flag); err != nil {
 		t.Fatalf("applyBool = %v", err)
 	}
-	if listen != "127.0.0.1:18080" || level != "info" || count != 42 || !flag {
-		t.Errorf("got %q %q %d %v", listen, level, count, flag)
+	if err := document.applyBool("quiet", &quiet); err != nil {
+		t.Fatalf("applyBool = %v", err)
+	}
+	if listen != "127.0.0.1:18080" || level != "info" || count != 42 || !flag || quiet {
+		t.Errorf("got %q %q %d %v %v", listen, level, count, flag, quiet)
 	}
 }
 
@@ -80,9 +85,6 @@ func TestTOMLLeavesAbsentKeysAlone(t *testing.T) {
 	}
 	if value != "unchanged" || number != 7 || !flag || duration != time.Minute || len(list) != 1 {
 		t.Error("an absent key overwrote a default")
-	}
-	if document.has("absent") {
-		t.Error("has() reports an absent key")
 	}
 }
 
@@ -226,6 +228,10 @@ hex      = 0x10
 		if tc.err == nil {
 			t.Errorf("%s was accepted", tc.name)
 		}
+	}
+	invalidEscape := mustParse(t, `escaped = "\q"`)
+	if err := invalidEscape.applyString("escaped", &text); err == nil {
+		t.Error("applyString accepted an invalid basic-string escape")
 	}
 }
 

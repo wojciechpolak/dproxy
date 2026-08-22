@@ -199,15 +199,6 @@ type Allowlist struct {
 // resolved-address checks still apply.
 func AllowAll() Allowlist { return Allowlist{all: true} }
 
-// NewAllowlist builds a list from already-parsed patterns.
-func NewAllowlist(patterns ...HostPattern) Allowlist {
-	list := Allowlist{}
-	for _, pattern := range patterns {
-		list.add(pattern)
-	}
-	return list
-}
-
 func (a *Allowlist) add(pattern HostPattern) {
 	for _, existing := range a.patterns {
 		if existing == pattern {

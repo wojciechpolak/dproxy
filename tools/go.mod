@@ -4,6 +4,7 @@ go 1.26.6
 
 tool (
 	github.com/Kunde21/markdownfmt/v3/cmd/markdownfmt
+	golang.org/x/tools/cmd/deadcode
 	golang.org/x/tools/cmd/goimports
 	golang.org/x/vuln/cmd/govulncheck
 	honnef.co/go/tools/cmd/staticcheck

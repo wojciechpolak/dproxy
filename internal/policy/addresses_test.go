@@ -75,13 +75,6 @@ func TestClassifyAddress(t *testing.T) {
 			if got.Public() != (tc.want == AddressPublic) {
 				t.Errorf("Public() = %v for class %s", got.Public(), got)
 			}
-			decision := CheckAddress(address)
-			if decision.Allowed() != (tc.want == AddressPublic) {
-				t.Errorf("CheckAddress = %s for class %s", decision, got)
-			}
-			if !decision.Allowed() && decision.Reason() != DenyNonPublicAddress {
-				t.Errorf("Reason() = %s, want %s", decision.Reason(), DenyNonPublicAddress)
-			}
 		})
 	}
 }
@@ -92,8 +85,8 @@ func TestClassifyInvalidAddress(t *testing.T) {
 	if got := ClassifyAddress(address); got != AddressInvalid {
 		t.Fatalf("ClassifyAddress(zero) = %s, want %s", got, AddressInvalid)
 	}
-	if CheckAddress(address).Allowed() {
-		t.Error("the zero netip.Addr was permitted")
+	if ClassifyAddress(address).Public() {
+		t.Error("the zero netip.Addr is public")
 	}
 }
 

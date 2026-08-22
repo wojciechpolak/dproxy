@@ -4,9 +4,14 @@
 package policy
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
+
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, errors.New("read failed") }
 
 func TestParseHostPatternCanonicalizes(t *testing.T) {
 	cases := []struct {
@@ -41,22 +46,17 @@ func TestParseHostPatternCanonicalizes(t *testing.T) {
 	}
 }
 
-func TestAllowlistConstructorsReturnIndependentPatterns(t *testing.T) {
-	exact, err := ParseHostPattern("api.openai.com")
+func TestAllowlistReturnsIndependentPatterns(t *testing.T) {
+	list, err := ParseAllowlist([]string{"api.openai.com", "*.openai.com", "api.openai.com"})
 	if err != nil {
-		t.Fatalf("ParseHostPattern: %v", err)
+		t.Fatalf("ParseAllowlist: %v", err)
 	}
-	wildcard, err := ParseHostPattern("*.openai.com")
-	if err != nil {
-		t.Fatalf("ParseHostPattern: %v", err)
-	}
-	list := NewAllowlist(exact, wildcard, exact)
 	if list.Len() != 2 {
-		t.Fatalf("NewAllowlist length = %d, want 2", list.Len())
+		t.Fatalf("ParseAllowlist length = %d, want 2", list.Len())
 	}
 	patterns := list.Patterns()
 	patterns[0] = HostPattern{}
-	if list.Patterns()[0] != exact {
+	if list.Patterns()[0].String() != "api.openai.com" {
 		t.Fatal("Patterns returned mutable allowlist storage")
 	}
 	checker := NewChecker(list, nil)
@@ -193,6 +193,12 @@ func TestReadAllowlistReportsLineNumber(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "line 3") {
 		t.Errorf("error %v does not name line 3", err)
+	}
+}
+
+func TestReadAllowlistReportsReadFailure(t *testing.T) {
+	if _, err := ReadAllowlist(errReader{}); err == nil || !strings.Contains(err.Error(), "read allowlist") {
+		t.Fatalf("ReadAllowlist read error = %v", err)
 	}
 }
 

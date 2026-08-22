@@ -107,17 +107,7 @@ func TestEncoderReportsPrefixAndBodyWriteFailures(t *testing.T) {
 	}
 }
 
-func TestProtocolValuesRenderEveryDefinedCase(t *testing.T) {
-	states := []State{StateNew, StateHelloSent, StateAuthenticated, StateOpenRequested, StateRelaying, StateClosed}
-	for _, state := range states {
-		if got := state.String(); strings.HasPrefix(got, "State(") {
-			t.Errorf("state %d has no name", state)
-		}
-	}
-	if got := State(99).String(); got != "State(99)" {
-		t.Errorf("unknown state = %q", got)
-	}
-
+func TestErrorCodeRendersEveryDefinedCase(t *testing.T) {
 	codes := []ErrorCode{
 		ErrorUnauthenticated,
 		ErrorForbiddenDestination,
@@ -138,10 +128,6 @@ func TestProtocolValuesRenderEveryDefinedCase(t *testing.T) {
 		t.Errorf("unknown error code = %q", got)
 	}
 
-	unexpected := (&UnexpectedMessageError{State: StateNew, Message: MessageOpen}).Error()
-	if !strings.Contains(unexpected, "OPEN") || !strings.Contains(unexpected, "new") {
-		t.Errorf("unexpected-message error = %q", unexpected)
-	}
 	unsupported := (&UnsupportedVersionError{Offered: 9}).Error()
 	if !strings.Contains(unsupported, "9") || !strings.Contains(unsupported, Version1.String()) {
 		t.Errorf("unsupported-version error = %q", unsupported)

@@ -231,12 +231,6 @@ func (d *tomlDocument) errorAt(line int, err error) error {
 	return fmt.Errorf("%s line %d: %w", d.path, line, err)
 }
 
-// has reports whether the file set a key.
-func (d *tomlDocument) has(key string) bool {
-	_, ok := d.entries[key]
-	return ok
-}
-
 // rejectUnknownKeys fails on the first key the schema does not define, naming
 // it and its line.
 func (d *tomlDocument) rejectUnknownKeys(known []string) error {

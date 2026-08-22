@@ -55,6 +55,9 @@ jobs:
       - name: staticcheck
         run: make staticcheck
 
+      - name: deadcode
+        run: make deadcode
+
   # Unit tests, then the same suite under the race detector. Both run because
   # a race-detector build can hide an ordinary failure behind a timeout.
   test:

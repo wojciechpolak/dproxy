@@ -24,6 +24,9 @@ help: ## List the available targets
 $(BIN)/goimports: $(TOOLS)/go.mod $(TOOLS)/go.sum
 	$(GO) -C $(TOOLS) build -o ../$(BIN)/goimports golang.org/x/tools/cmd/goimports
 
+$(BIN)/deadcode: $(TOOLS)/go.mod $(TOOLS)/go.sum
+	$(GO) -C $(TOOLS) build -o ../$(BIN)/deadcode golang.org/x/tools/cmd/deadcode
+
 $(BIN)/markdownfmt: $(TOOLS)/go.mod $(TOOLS)/go.sum
 	$(GO) -C $(TOOLS) build -o ../$(BIN)/markdownfmt github.com/Kunde21/markdownfmt/v3/cmd/markdownfmt
 
@@ -39,7 +42,7 @@ $(BIN)/mdwrap: $(TOOLS)/go.mod $(TOOLS)/mdwrap/main.go
 	$(GO) -C $(TOOLS) build -o ../$(BIN)/mdwrap ./mdwrap
 
 .PHONY: tools
-tools: $(BIN)/goimports $(BIN)/markdownfmt $(BIN)/staticcheck $(BIN)/govulncheck $(BIN)/mdwrap ## Build the development tools
+tools: $(BIN)/goimports $(BIN)/deadcode $(BIN)/markdownfmt $(BIN)/staticcheck $(BIN)/govulncheck $(BIN)/mdwrap ## Build the development tools
 
 .PHONY: build
 build: ## Compile every package and write bin/dproxy
@@ -99,6 +102,10 @@ vet: ## Run go vet
 staticcheck: $(BIN)/staticcheck ## Run staticcheck
 	$(BIN)/staticcheck ./...
 
+.PHONY: deadcode
+deadcode: $(BIN)/deadcode ## Report unreachable functions from the dproxy command and its tests
+	$(BIN)/deadcode -test ./cmd/dproxy
+
 .PHONY: test
 test: ## Run the unit tests
 	$(GO) test ./...
@@ -121,7 +128,7 @@ vuln: $(BIN)/govulncheck ## Check the product module for known vulnerabilities
 
 .PHONY: vuln-tools
 vuln-tools: tools ## Check the built development tools for known vulnerabilities
-	@for tool in $(BIN)/goimports $(BIN)/markdownfmt $(BIN)/staticcheck $(BIN)/govulncheck; do \
+	@for tool in $(BIN)/goimports $(BIN)/deadcode $(BIN)/markdownfmt $(BIN)/staticcheck $(BIN)/govulncheck; do \
 		echo "==> $$tool"; \
 		$(BIN)/govulncheck -mode=binary "$$tool" || exit 1; \
 	done
@@ -159,7 +166,7 @@ clean: ## Remove built binaries
 	rm -rf $(BIN)
 
 .PHONY: check
-check: fmt-check md-check deps-check tidy-check vet staticcheck build test coverage test-tools race vuln release-check ## Run the full local gate
+check: fmt-check md-check deps-check tidy-check vet staticcheck deadcode build test coverage test-tools race vuln release-check ## Run the full local gate
 
 # ci is what the workflows run: the same gate plus the end-to-end suite.
 .PHONY: ci

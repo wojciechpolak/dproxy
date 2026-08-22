@@ -117,14 +117,6 @@ func ClassifyAddress(address netip.Addr) AddressClass {
 	return AddressPublic
 }
 
-// CheckAddress decides whether one resolved address may be dialed.
-func CheckAddress(address netip.Addr) Decision {
-	if ClassifyAddress(address).Public() {
-		return Allow()
-	}
-	return Deny(DenyNonPublicAddress)
-}
-
 // FirstNonPublic returns the first address that may not be dialed and its
 // class, and whether one was found.
 func FirstNonPublic(addresses []netip.Addr) (netip.Addr, AddressClass, bool) {
