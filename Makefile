@@ -11,6 +11,11 @@ GO ?= go
 BIN := bin
 TOOLS := tools
 COVERAGE_MIN ?= 90.0
+BENCHSETUP ?= 100x
+BENCHTIME ?= 2s
+BENCHCOUNT ?= 5
+BENCHMEMORY ?= 1x
+BENCHPROFILE_DIR ?=
 
 .DEFAULT_GOAL := help
 
@@ -160,6 +165,36 @@ e2e-cloudflare: ## Run the real Cloudflare relay and packet-capture privacy test
 provider-compat: ## Test Codex CLI, Claude Code, curl, git, streaming, and WebSockets locally
 	DPROXY_PROVIDER_COMPAT=1 $(GO) test -race -tags e2e ./internal/integration \
 		-run 'TestHTTPSProxyCompatibility|TestProviderCLICompatibility|TestProviderStyle'
+
+.PHONY: benchmark
+benchmark: ## Benchmark tunnel setup and fixture throughput
+	$(GO) test -tags e2e ./internal/integration -run '^$$' \
+		-bench '^BenchmarkTunnelSetup$$' -benchmem \
+		-benchtime '$(BENCHSETUP)' -count '$(BENCHCOUNT)'
+	$(GO) test -tags e2e ./internal/integration -run '^$$' \
+		-bench '^Benchmark(SteadyStateThroughput|ConcurrentThroughput)$$' \
+		-benchmem -benchtime '$(BENCHTIME)' -count '$(BENCHCOUNT)'
+	$(GO) test -tags e2e ./internal/integration -run '^$$' \
+		-bench '^BenchmarkLiveSessionFootprint$$' -benchmem \
+		-benchtime '$(BENCHMEMORY)' -count '$(BENCHCOUNT)'
+
+.PHONY: benchmark-docker
+benchmark-docker: ## Benchmark the production remote image with fixture services
+	DPROXY_DOCKER_BENCHMARK=1 DPROXY_BENCH_SETUP='$(BENCHSETUP)' \
+		DPROXY_BENCH_TIME='$(BENCHTIME)' DPROXY_BENCH_COUNT='$(BENCHCOUNT)' \
+		./scripts/docker-e2e.sh
+
+.PHONY: benchmark-profile
+benchmark-profile: ## Write CPU and allocation profiles for 64 concurrent fixture sessions
+	@test -n "$(BENCHPROFILE_DIR)" || { echo "BENCHPROFILE_DIR is required" >&2; exit 2; }
+	mkdir -p "$(BENCHPROFILE_DIR)"
+	$(GO) test -tags e2e ./internal/integration -run '^$$' \
+		-bench '^BenchmarkConcurrentThroughput/sessions=64$$' -benchtime '$(BENCHTIME)' \
+		-count 1 -o "$(BENCHPROFILE_DIR)/integration.test" \
+		-outputdir "$(BENCHPROFILE_DIR)" -cpuprofile cpu.pprof \
+		-memprofile allocs.pprof
+	$(GO) tool pprof -top "$(BENCHPROFILE_DIR)/cpu.pprof"
+	$(GO) tool pprof -top -sample_index=alloc_space "$(BENCHPROFILE_DIR)/allocs.pprof"
 
 .PHONY: clean
 clean: ## Remove built binaries

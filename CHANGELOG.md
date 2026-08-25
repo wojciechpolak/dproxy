@@ -7,6 +7,12 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A fixture-only `make benchmark` harness for tunnel setup, steady-state
+  throughput, concurrent-session throughput, live-session heap, CPU and
+  allocation profiles, and the production remote Docker image.
+
 ## [1.0.0] - 2026-08-21
 
 Initial public release.

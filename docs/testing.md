@@ -16,6 +16,7 @@ main test targets are:
 | `make e2e`             | Both deterministic suites                   |
 | `make provider-compat` | `curl`, Git, Codex CLI, and Claude Code     |
 | `make e2e-cloudflare`  | Public deployment and packet-capture checks |
+| `make benchmark`       | Fixture tunnel setup and throughput         |
 
 The deterministic topology uses generated credentials and local fixtures. It
 tests byte preservation, streaming, half-close, cancellation, deadlines,
@@ -37,6 +38,57 @@ request and `git ls-remote` reads a local smart-HTTP response.
 The provider CLIs may still read their saved user profiles and initialize local
 plugins or MCP services. Use a disposable OS account if that is unacceptable.
 The ordinary `make e2e-local` target does not start either provider CLI.
+
+## Benchmarks
+
+`make benchmark` measures the v1 one-tunnel-per-`CONNECT` model against the same
+local TLS origin and relay fixtures used by the end-to-end suite. It does not
+use provider credentials, public DNS, or the public network.
+
+The setup benchmark includes the local TCP connection, HTTP `CONNECT`, outer
+TLS, WebSocket upgrade, pinned inner TLS, authentication, policy checks, fixture
+resolution, and the origin TCP dial. It excludes the application's TLS
+handshake. The throughput benchmarks reuse established tunnels and report the
+combined bytes sent and echoed. Concurrent runs use 1, 8, 32, and 64 sessions;
+64 is the shipped remote session limit.
+
+The default command takes five fixed 100-operation setup samples and five
+two-second throughput samples. Setup uses a fixed iteration count because each
+operation consumes three short-lived TCP source ports. Letting the Go benchmark
+runner increase that count until two seconds elapse can exhaust the macOS port
+range before `TIME_WAIT` entries expire.
+
+The command reports `ns/op`, `MB/s`, `B/op`, and `allocs/op`. Override the
+sampling controls when a longer run is needed. Keep `BENCHSETUP` low enough for
+the host's available source-port range:
+
+```sh
+BENCHSETUP=200x BENCHTIME=5s BENCHCOUNT=10 make benchmark
+```
+
+`BenchmarkLiveSessionFootprint` holds 1, 8, 32, and 64 application TLS sessions
+open and reports the additional Go heap for each live session. It is a retained
+heap measurement, not the total memory used by the operating system or a remote
+Docker container.
+
+`make benchmark-docker` starts the fixture services and the production remote
+image, then measures setup and steady-state throughput through that image. It
+uses the same sampling variables as `make benchmark`. Docker Desktop resource
+limits belong in the saved environment details because they affect the result.
+
+Use `make benchmark-profile` to write CPU and allocation profiles for 64
+concurrent in-process sessions. Choose a disposable output directory:
+
+```sh
+BENCHPROFILE_DIR=/tmp/dproxy-benchmark BENCHTIME=5s make benchmark-profile
+```
+
+The profile includes the local proxy, relay, and fixture origin because they run
+in one Go process. Compare it with the Docker run before assigning a limit to
+any one component.
+
+[Benchmark results](benchmarks.md) records the initial in-process and Docker
+comparison.
 
 ## Public deployment check
 

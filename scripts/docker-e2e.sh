@@ -30,4 +30,17 @@ until curl --fail --silent --show-error http://127.0.0.1:18686/healthz >/dev/nul
 	sleep 1
 done
 
+if [ "${DPROXY_DOCKER_BENCHMARK:-}" = 1 ]; then
+	: "${DPROXY_BENCH_SETUP:=100x}"
+	: "${DPROXY_BENCH_TIME:=2s}"
+	: "${DPROXY_BENCH_COUNT:=5}"
+	go test -tags e2e,docker_e2e ./internal/integration -run '^$' \
+		-bench '^BenchmarkDockerizedRemoteTunnelSetup$' -benchmem \
+		-benchtime "$DPROXY_BENCH_SETUP" -count "$DPROXY_BENCH_COUNT"
+	go test -tags e2e,docker_e2e ./internal/integration -run '^$' \
+		-bench '^BenchmarkDockerizedRemoteThroughput$' -benchmem \
+		-benchtime "$DPROXY_BENCH_TIME" -count "$DPROXY_BENCH_COUNT"
+	exit 0
+fi
+
 go test -race -tags docker_e2e ./internal/integration -run TestDockerizedRemoteEndToEnd -count=1

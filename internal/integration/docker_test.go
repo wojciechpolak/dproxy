@@ -7,12 +7,10 @@ package integration_test
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -30,6 +28,27 @@ import (
 )
 
 func TestDockerizedRemoteEndToEnd(t *testing.T) {
+	topology := newDockerTopology(t)
+	origin := topology.openTLS(t)
+	payload := []byte("dockerized remote relay payload 9f0b5ff6")
+	echo := make([]byte, len(payload))
+	if err := benchmarkRoundTrip(origin, payload, echo); err != nil {
+		t.Fatalf("relay payload: %v", err)
+	}
+}
+
+const (
+	testDockerOriginHost       = "origin.e2e.test"
+	dockerBenchmarkPayloadSize = 1 << 20
+)
+
+type dockerTopology struct {
+	localAt string
+	roots   *x509.CertPool
+}
+
+func newDockerTopology(t testing.TB) *dockerTopology {
+	t.Helper()
 	directory := os.Getenv("DPROXY_E2E_DIR")
 	if directory == "" {
 		t.Fatal("DPROXY_E2E_DIR is required")
@@ -81,10 +100,7 @@ func TestDockerizedRemoteEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build local proxy: %v", err)
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen for local proxy: %v", err)
-	}
+	listener := listenDockerLoopback(t)
 	served := make(chan error, 1)
 	go func() { served <- local.Serve(listener) }()
 	t.Cleanup(func() {
@@ -93,53 +109,97 @@ func TestDockerizedRemoteEndToEnd(t *testing.T) {
 		if err := local.Shutdown(ctx); err != nil {
 			t.Errorf("shut down local proxy: %v", err)
 		}
-		if err := <-served; err != nil {
-			t.Errorf("serve local proxy: %v", err)
+		select {
+		case err := <-served:
+			if err != nil {
+				t.Errorf("serve local proxy: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Errorf("local proxy did not stop")
 		}
 	})
-
-	raw, err := net.DialTimeout("tcp", listener.Addr().String(), time.Second)
-	if err != nil {
-		t.Fatalf("connect to local proxy: %v", err)
-	}
-	authority := testDockerOriginHost + ":443"
-	if _, err := fmt.Fprintf(raw, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", authority, authority); err != nil {
-		t.Fatalf("write CONNECT: %v", err)
-	}
-	reader := bufio.NewReader(raw)
-	response, err := http.ReadResponse(reader, nil)
-	if err != nil {
-		t.Fatalf("read CONNECT response: %v", err)
-	}
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("CONNECT status = %d, want 200", response.StatusCode)
-	}
 	roots, err := readRoots(filepath.Join(directory, "ca.pem"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	origin := tls.Client(&dockerBufferedConn{Conn: raw, reader: reader}, &tls.Config{
-		RootCAs: roots, ServerName: testDockerOriginHost,
+	return &dockerTopology{localAt: listener.Addr().String(), roots: roots}
+}
+
+func (t *dockerTopology) connect(tb testing.TB) net.Conn {
+	tb.Helper()
+	raw, err := net.DialTimeout("tcp", t.localAt, time.Second)
+	if err != nil {
+		tb.Fatalf("connect to local proxy: %v", err)
+	}
+	authority := testDockerOriginHost + ":443"
+	if _, err := fmt.Fprintf(raw, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", authority, authority); err != nil {
+		_ = raw.Close()
+		tb.Fatalf("write CONNECT: %v", err)
+	}
+	reader := bufio.NewReader(raw)
+	response, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		_ = raw.Close()
+		tb.Fatalf("read CONNECT response: %v", err)
+	}
+	if response.StatusCode != http.StatusOK {
+		_ = raw.Close()
+		tb.Fatalf("CONNECT status = %d, want 200", response.StatusCode)
+	}
+	return &dockerBufferedConn{Conn: raw, reader: reader}
+}
+
+func (t *dockerTopology) openTLS(tb testing.TB) *tls.Conn {
+	tb.Helper()
+	origin := tls.Client(t.connect(tb), &tls.Config{
+		RootCAs: t.roots, ServerName: testDockerOriginHost,
 		MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13,
 	})
-	if err := origin.Handshake(); err != nil {
-		t.Fatalf("origin TLS handshake through Dockerized remote: %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := origin.HandshakeContext(ctx); err != nil {
+		_ = origin.Close()
+		tb.Fatalf("origin TLS handshake through Dockerized remote: %v", err)
 	}
-	defer func() { _ = origin.Close() }()
-	payload := []byte("dockerized remote relay payload 9f0b5ff6")
-	if _, err := origin.Write(payload); err != nil {
-		t.Fatalf("write origin payload: %v", err)
-	}
-	echo := make([]byte, len(payload))
-	if _, err := io.ReadFull(origin, echo); err != nil {
-		t.Fatalf("read origin echo: %v", err)
-	}
-	if !bytes.Equal(echo, payload) {
-		t.Fatalf("echo = %q, want %q", echo, payload)
+	tb.Cleanup(func() { _ = origin.Close() })
+	return origin
+}
+
+func BenchmarkDockerizedRemoteTunnelSetup(b *testing.B) {
+	topology := newDockerTopology(b)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		conn := topology.connect(b)
+		if err := conn.Close(); err != nil {
+			b.Fatalf("close tunnel: %v", err)
+		}
 	}
 }
 
-const testDockerOriginHost = "origin.e2e.test"
+func BenchmarkDockerizedRemoteThroughput(b *testing.B) {
+	topology := newDockerTopology(b)
+	conn := topology.openTLS(b)
+	payload := bytePattern(dockerBenchmarkPayloadSize)
+	scratch := make([]byte, len(payload))
+	b.SetBytes(int64(2 * len(payload)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if err := benchmarkRoundTrip(conn, payload, scratch); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func listenDockerLoopback(t testing.TB) net.Listener {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for local proxy: %v", err)
+	}
+	return listener
+}
 
 type plainStreamDialer struct {
 	address  string

@@ -308,6 +308,7 @@ checks.
 - [Deployment](docs/deployment.md)
 - [Threat model](docs/threat-model.md)
 - [Testing](docs/testing.md)
+- [Benchmark results](docs/benchmarks.md)
 - [Releases and Homebrew](docs/release.md)
 
 ## License

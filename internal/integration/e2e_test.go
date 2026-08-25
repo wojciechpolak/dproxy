@@ -445,7 +445,7 @@ type testTopology struct {
 	token   config.Token
 }
 
-func newTopology(t *testing.T, options topologyOptions) *testTopology {
+func newTopology(t testing.TB, options topologyOptions) *testTopology {
 	t.Helper()
 	token, err := config.NewToken([]byte("e2e-token-7eeb9c6404c141d48fb83d8ed6747f82"))
 	if err != nil {
@@ -551,7 +551,7 @@ func newTopology(t *testing.T, options topologyOptions) *testTopology {
 	return topology
 }
 
-func (t *testTopology) connect(tb *testing.T, authority string) (*http.Response, net.Conn) {
+func (t *testTopology) connect(tb testing.TB, authority string) (*http.Response, net.Conn) {
 	tb.Helper()
 	conn, err := net.DialTimeout("tcp", t.localAt, time.Second)
 	if err != nil {
@@ -571,7 +571,7 @@ func (t *testTopology) connect(tb *testing.T, authority string) (*http.Response,
 	return response, &bufferedConn{Conn: conn, reader: reader}
 }
 
-func (t *testTopology) openTLS(tb *testing.T) (*tls.Conn, net.Conn) {
+func (t *testTopology) openTLS(tb testing.TB) (*tls.Conn, net.Conn) {
 	tb.Helper()
 	response, raw := t.connect(tb, testOriginHost+":443")
 	if response.StatusCode != http.StatusOK {
@@ -794,7 +794,7 @@ type originServer struct {
 	conns    map[net.Conn]struct{}
 }
 
-func startOrigin(t *testing.T, handler func(*tls.Conn)) *originServer {
+func startOrigin(t testing.TB, handler func(*tls.Conn)) *originServer {
 	t.Helper()
 	certificate, roots := testCertificate(t, testOriginHost)
 	listener := listenLoopback(t)
@@ -995,15 +995,7 @@ func readApplicationWebSocketFrame(reader io.Reader, wantMasked bool) ([]byte, e
 	return payload, nil
 }
 
-func bytePattern(size int) []byte {
-	data := make([]byte, size)
-	for index := range data {
-		data[index] = byte((index*131 + index/251) & 0xff)
-	}
-	return data
-}
-
-func listenLoopback(t *testing.T) net.Listener {
+func listenLoopback(t testing.TB) net.Listener {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -1012,7 +1004,7 @@ func listenLoopback(t *testing.T) net.Listener {
 	return listener
 }
 
-func mustURL(t *testing.T, raw string) *url.URL {
+func mustURL(t testing.TB, raw string) *url.URL {
 	t.Helper()
 	parsed, err := url.Parse(raw)
 	if err != nil {
@@ -1021,7 +1013,7 @@ func mustURL(t *testing.T, raw string) *url.URL {
 	return parsed
 }
 
-func testCertificate(t *testing.T, hostname string) (tls.Certificate, *x509.CertPool) {
+func testCertificate(t testing.TB, hostname string) (tls.Certificate, *x509.CertPool) {
 	t.Helper()
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -1057,7 +1049,7 @@ func testCertificate(t *testing.T, hostname string) (tls.Certificate, *x509.Cert
 	return certificate, roots
 }
 
-func shutdownServer(t *testing.T, shutdown func(context.Context) error, served <-chan error, name string) {
+func shutdownServer(t testing.TB, shutdown func(context.Context) error, served <-chan error, name string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
