@@ -1,9 +1,9 @@
-# Optional OpenAI and Anthropic allowlist — one pattern per line.
+# Optional OpenAI and Anthropic allowlist, one pattern per line.
 #
 # Syntax:
 #   example.com     exact hostname match (case-insensitive, IDNA/A-label form)
 #   *.example.com   one or more labels in place of the star; does NOT match
-#                   the bare "example.com" — list that separately if wanted
+#                   the bare "example.com". List that separately if wanted.
 #
 # Blank lines and lines starting with "#" are ignored.
 # Ports are not part of a pattern: v1 permits port 443 only.

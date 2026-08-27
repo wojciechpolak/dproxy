@@ -5,8 +5,8 @@
 // canonicalization, allowlist matching, the port-443 restriction, and
 // rejection of IP-literal and non-public resolved addresses.
 //
-// A check runs in this order, and the order matters — a refused destination
-// costs no DNS query, and an allowed name is checked again after it resolves:
+// A check runs in this order, and the order matters. A refused destination
+// costs no DNS query. An allowed name is checked again after it resolves:
 //
 //	ParseAuthority → Allowlist.Permits → Resolver.LookupAddresses → CheckAddresses
 //

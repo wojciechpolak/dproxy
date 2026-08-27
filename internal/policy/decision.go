@@ -75,7 +75,8 @@ func Allow() Decision { return Decision{allowed: true} }
 func Deny(reason DenyReason) Decision { return Decision{reason: reason} }
 
 // DenyBecause returns a refusing decision carrying the underlying cause, for
-// failures the reason token alone cannot explain — a resolver error above all.
+// failures the reason token alone cannot explain. Resolver errors are the main
+// example.
 //
 // The cause may name the destination, so it belongs in a verbose run only;
 // normal-mode logging records Reason.

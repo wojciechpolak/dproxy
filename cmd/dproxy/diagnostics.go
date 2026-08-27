@@ -28,8 +28,8 @@ import (
 // The "dproxy test" report. It establishes the transport a tunnel would use
 // and prints what each stage negotiated.
 //
-// Nothing here prints a token, a request, application bytes, or — unless the
-// operator asked for destinations in the log — the relay hostname. The outer
+// Nothing here prints a token, request, or application bytes. It also omits
+// the relay hostname unless the operator enabled destination logging. The outer
 // SNI is printed because it is the ECHConfig's public name rather than the
 // private relay hostname.
 

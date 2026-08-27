@@ -104,9 +104,9 @@ func refuseRedirect(*http.Request, []*http.Request) error { return http.ErrUseLa
 // newDoHTransport builds the HTTPS transport for the resolver endpoint.
 //
 // The endpoint's own SNI is visible: it has no HTTPS record dproxy could have
-// fetched without a resolver. That is acceptable and unrelated to the guarantee
-// dproxy makes — a shared public resolver's name says nothing about which relay
-// or which provider this process talks to.
+// fetched without a resolver. That is acceptable and unrelated to dproxy's
+// guarantee. A shared public resolver's name says nothing about the relay or
+// provider this process uses.
 func newDoHTransport(options ResolverOptions) (*http.Transport, error) {
 	host := options.URL.Hostname()
 	port := options.URL.Port()

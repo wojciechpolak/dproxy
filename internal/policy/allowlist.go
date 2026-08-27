@@ -113,8 +113,8 @@ func (e *InvalidPatternError) Error() string {
 
 // ParseHostPattern validates and canonicalizes one allowlist entry: case
 // folding, trailing root dot removed, anything not a plain ASCII hostname
-// rejected. Internationalized names must be given in A-label form — a
-// non-ASCII entry is rejected rather than converted, so no name can be
+// rejected. Internationalized names must use A-label form. A non-ASCII entry
+// is rejected rather than converted, so no name can be
 // silently reinterpreted into a different one.
 func ParseHostPattern(raw string) (HostPattern, error) {
 	trimmed := strings.TrimSpace(raw)

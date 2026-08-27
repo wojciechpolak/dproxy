@@ -20,9 +20,9 @@ type Message interface {
 	Validate() error
 }
 
-// Hello is the client's opening message. The token travels in it and nowhere
-// else — never in a hostname, URL, header, or query parameter — and never
-// before inner TLS and pin verification have both succeeded.
+// Hello is the client's opening message. The token travels only in this
+// message, never in a hostname, URL, header, or query parameter. It is sent
+// only after inner TLS and pin verification succeed.
 //
 // Token is a config.Token rather than []byte so it redacts itself in every
 // formatting path, including %+v on this struct.

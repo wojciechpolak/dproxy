@@ -44,8 +44,8 @@ func NewDestination(host string, port uint16) (Destination, error) {
 // request or of a decoded OPEN message.
 //
 // The syntax is "host:port" and "[ipv6]:port", the second only so it can be
-// rejected. Everything else — missing port, service name, leading-zero port,
-// userinfo, path, surrounding whitespace, second colon — is malformed.
+// rejected. A missing port, service name, leading-zero port, userinfo, path,
+// surrounding whitespace, or second colon is malformed.
 // Nothing is repaired or guessed at.
 func ParseAuthority(raw string) (Destination, error) {
 	if raw == "" {
