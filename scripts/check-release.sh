@@ -13,9 +13,18 @@ trap 'rm -rf "$first" "$second"' EXIT
 diff -r "$first" "$second"
 
 archive="$(find "$first" -name '*.tar.gz' -type f -print -quit)"
-tar -tzf "$archive" | diff -u - <(printf 'LICENSE\ndproxy\n')
-test -x "$first/dproxy-darwin-arm64"
-cmp "$first/dproxy-darwin-arm64" <(tar -xOzf "$archive" dproxy)
+goos="${target%/*}"
+goarch="${target#*/}"
+executable="dproxy"
+suffix=""
+if [ "$goos" = windows ]; then
+    executable="dproxy.exe"
+    suffix=".exe"
+fi
+direct="$first/dproxy-${goos}-${goarch}${suffix}"
+tar -tzf "$archive" | diff -u - <(printf 'LICENSE\n%s\n' "$executable")
+test -f "$direct"
+cmp "$direct" <(tar -xOzf "$archive" "$executable")
 
 (
     cd "$first"

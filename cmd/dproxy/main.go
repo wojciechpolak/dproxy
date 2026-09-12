@@ -77,6 +77,6 @@ Commands:
 Run "dproxy <command> --help" for the flags of a command.
 
 Point a client at the local proxy with:
-  export HTTPS_PROXY=http://127.0.0.1:18080
 `)
+	fmt.Fprint(w, proxyEnvironmentUsage())
 }

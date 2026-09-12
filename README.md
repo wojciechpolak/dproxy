@@ -58,7 +58,7 @@ remote TCP connection. v1 does not multiplex connections.
 | Private channel   | Inner TLS 1.3 with a pinned Ed25519 server identity                                                      |
 | Tunnel protocol   | Length-prefixed `dproxy/1` control messages, followed by an unframed TCP byte stream                     |
 | Remote deployment | Non-root Docker image behind a provider-neutral WSS front end; Cloudflare Tunnel is the included example |
-| Distribution      | Reproducible macOS and Linux binaries and archives, checksums, provenance, Homebrew, and GHCR            |
+| Distribution      | Reproducible macOS, Linux, and Windows binaries and archives, checksums, provenance, Homebrew, and GHCR  |
 
 The shipped Go binary does not depend on Docker or Cloudflare; those belong to
 the remote deployment.
@@ -88,8 +88,8 @@ and the threats v1 does not try to solve.
 
 ## Requirements
 
-- macOS or Linux on arm64 or amd64 for a prebuilt binary, or Go 1.26.6 to build
-  it
+- macOS, Linux, or Windows on arm64 or amd64 for a prebuilt binary, or Go 1.26.6
+  to build it
 - Docker and an ECH-capable TLS/WSS front end for the remote relay deployment
 
 The shipped binary uses only the Go standard library. Development tools live in
@@ -124,7 +124,8 @@ Release assets are plain HTTPS downloads, so GitHub CLI is not required.
 `/releases/latest/download/` resolves to the newest stable release and never to
 a prerelease tag. Use `/releases/download/vX.Y.Z/` to pin a version. Choose the
 platform with `dproxy-linux-amd64`, `dproxy-linux-arm64`, `dproxy-darwin-amd64`,
-or `dproxy-darwin-arm64`.
+`dproxy-darwin-arm64`, `dproxy-windows-amd64.exe`, or
+`dproxy-windows-arm64.exe`.
 
 With GitHub CLI installed, the same download is:
 
@@ -132,6 +133,18 @@ With GitHub CLI installed, the same download is:
 gh release download vX.Y.Z --pattern 'dproxy-linux-amd64'
 sudo install -m 0755 dproxy-linux-amd64 /usr/local/bin/dproxy
 ```
+
+On Windows, download the executable with PowerShell and put it in a directory on
+`PATH`:
+
+```powershell
+Invoke-WebRequest `
+  https://github.com/wojciechpolak/dproxy/releases/latest/download/dproxy-windows-amd64.exe `
+  -OutFile dproxy.exe
+.\dproxy.exe --version
+```
+
+Use `dproxy-windows-arm64.exe` on Windows on ARM.
 
 The [release guide](docs/release.md) explains how to verify the binary checksum
 and GitHub build attestation before installing it.
@@ -204,15 +217,29 @@ impostor. Never copy `state/identity.pem` to a client. It contains the server's
 private key. The Cloudflare Tunnel token is also server-side only.
 
 The client token file must contain the exact same bytes as
-`secrets/dproxy_token`. Store it under the XDG configuration directory with mode
-0600, then copy the example configuration. dproxy uses `$XDG_CONFIG_HOME` when
-set and `~/.config` otherwise, including on macOS.
+`secrets/dproxy_token`. On macOS and Linux, store it under the XDG configuration
+directory with mode 0600. dproxy uses `$XDG_CONFIG_HOME` when set and
+`~/.config` otherwise, including on macOS.
 
 ```sh
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
 mkdir -p "$config_home/dproxy"
 install -m 600 /path/to/copied/dproxy_token "$config_home/dproxy/token"
 cp configs/client.example.toml "$config_home/dproxy/client.toml"
+```
+
+On Windows, dproxy uses `%AppData%\dproxy` unless `XDG_CONFIG_HOME` is set. Copy
+the token and configuration with PowerShell, then remove inherited permissions
+from the token so only the current account can read it:
+
+```powershell
+$configHome = Join-Path $env:AppData "dproxy"
+New-Item -ItemType Directory -Force $configHome | Out-Null
+$token = Join-Path $configHome "token"
+Copy-Item C:\path\to\dproxy_token $token
+$account = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+icacls $token /inheritance:r /grant:r "${account}:(R)"
+Copy-Item .\configs\client.example.toml (Join-Path $configHome "client.toml")
 ```
 
 Without `--config`, `dproxy client` and `dproxy test` load `dproxy/client.toml`
@@ -272,6 +299,12 @@ Point a client at it:
 ```sh
 export HTTPS_PROXY=http://127.0.0.1:18080
 export https_proxy="$HTTPS_PROXY"
+```
+
+In PowerShell:
+
+```powershell
+$env:HTTPS_PROXY = "http://127.0.0.1:18080"
 ```
 
 The local listener accepts HTTP/1.1 `CONNECT` only. It rejects forward HTTP

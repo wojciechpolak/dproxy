@@ -9,8 +9,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/wojciechpolak/dproxy/internal/privatepath"
 )
 
 const secret = "0123456789abcdef0123456789abcdef"
@@ -21,7 +24,17 @@ func writeToken(t *testing.T, content string, mode os.FileMode) TokenFile {
 	if err := os.WriteFile(path, []byte(content), mode); err != nil {
 		t.Fatalf("write token: %v", err)
 	}
+	if runtime.GOOS == "windows" && mode.Perm() == 0o600 {
+		protectTestFile(t, path)
+	}
 	return TokenFile(path)
+}
+
+func protectTestFile(t *testing.T, path string) {
+	t.Helper()
+	if err := privatepath.Restrict(path, false); err != nil {
+		t.Fatalf("protect %s: %v", path, err)
+	}
 }
 
 func TestTokenFileRead(t *testing.T) {
@@ -56,12 +69,18 @@ func TestTokenFileRejects(t *testing.T) {
 		}
 	})
 	t.Run("group readable", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Unix mode bits do not represent Windows access-control lists")
+		}
 		file := writeToken(t, secret, 0o640)
 		if _, err := file.Read(); err == nil || !strings.Contains(err.Error(), "too open") {
 			t.Fatalf("Read() = %v, want a permissions error", err)
 		}
 	})
 	t.Run("world readable", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Unix mode bits do not represent Windows access-control lists")
+		}
 		file := writeToken(t, secret, 0o644)
 		if _, err := file.Read(); err == nil || !strings.Contains(err.Error(), "too open") {
 			t.Fatalf("Read() = %v, want a permissions error", err)

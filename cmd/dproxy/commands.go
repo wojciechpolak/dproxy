@@ -10,9 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"os/signal"
-	"syscall"
 
 	"github.com/wojciechpolak/dproxy/internal/config"
 	"github.com/wojciechpolak/dproxy/internal/localproxy"
@@ -47,7 +45,7 @@ func parse(fs *flag.FlagSet, args []string) (exitCode, bool) {
 // runClient loads and validates the client configuration and starts the local
 // CONNECT proxy.
 func runClient(args []string, _, stderr io.Writer) exitCode {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
 	return runClientContext(ctx, args, stderr)
 }
@@ -110,7 +108,7 @@ func runClientContext(ctx context.Context, args []string, stderr io.Writer) exit
 // runServer loads and validates the server configuration and starts the
 // remote relay endpoint.
 func runServer(args []string, _, stderr io.Writer) exitCode {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
 	return runServerContext(ctx, args, stderr)
 }
@@ -187,7 +185,7 @@ func runTest(args []string, stdout, stderr io.Writer) exitCode {
 		fmt.Fprintf(stderr, "dproxy test: %v\n", err)
 		return exitUsage
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
 
 	result := diagnose(ctx, settings)

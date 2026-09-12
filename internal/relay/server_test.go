@@ -22,6 +22,7 @@ import (
 	"github.com/wojciechpolak/dproxy/internal/config"
 	"github.com/wojciechpolak/dproxy/internal/logging"
 	"github.com/wojciechpolak/dproxy/internal/policy"
+	"github.com/wojciechpolak/dproxy/internal/privatepath"
 	"github.com/wojciechpolak/dproxy/internal/protocol"
 	"github.com/wojciechpolak/dproxy/internal/tunnel"
 )
@@ -488,6 +489,9 @@ func TestNewServerLoadsDefaultsAndRejectsBadOptions(t *testing.T) {
 	tokenPath := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(tokenPath, []byte("0123456789abcdef0123456789abcdef\n"), 0o600); err != nil {
 		t.Fatalf("write token: %v", err)
+	}
+	if err := privatepath.Restrict(tokenPath, false); err != nil {
+		t.Fatalf("protect token: %v", err)
 	}
 	settings.TokenFile = config.TokenFile(tokenPath)
 	server, err := NewServer(ServerOptions{Config: &settings, Resolver: resolver})

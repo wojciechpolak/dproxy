@@ -22,7 +22,7 @@ import (
 	"time"
 )
 
-const defaultTargets = "darwin/arm64,darwin/amd64,linux/arm64,linux/amd64"
+const defaultTargets = "darwin/arm64,darwin/amd64,linux/arm64,linux/amd64,windows/arm64,windows/amd64"
 
 var versionPattern = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
 
@@ -114,14 +114,15 @@ func buildRelease(tag, output string, targets []target, epoch time.Time) error {
 	}
 	var artifacts []string
 	for _, item := range targets {
-		binary := filepath.Join(work, item.goos+"_"+item.goarch, "dproxy")
+		executable := executableName(item)
+		binary := filepath.Join(work, item.goos+"_"+item.goarch, executable)
 		if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
 			return fmt.Errorf("create target work directory: %w", err)
 		}
 		if err := buildBinary(tag, item, binary); err != nil {
 			return err
 		}
-		directName := fmt.Sprintf("dproxy-%s-%s", item.goos, item.goarch)
+		directName := directBinaryName(item)
 		directPath := filepath.Join(output, directName)
 		contents, err := os.ReadFile(binary)
 		if err != nil {
@@ -136,7 +137,7 @@ func buildRelease(tag, output string, targets []target, epoch time.Time) error {
 		path := filepath.Join(output, name)
 		files := []archivedFile{
 			{name: "LICENSE", path: license, mode: 0o644},
-			{name: "dproxy", path: binary, mode: 0o755},
+			{name: executable, path: binary, mode: 0o755},
 		}
 		if err := writeArchive(path, files, epoch); err != nil {
 			return fmt.Errorf("write %s: %w", name, err)
@@ -144,6 +145,17 @@ func buildRelease(tag, output string, targets []target, epoch time.Time) error {
 		artifacts = append(artifacts, path)
 	}
 	return writeChecksums(filepath.Join(output, "SHA256SUMS"), artifacts)
+}
+
+func executableName(item target) string {
+	if item.goos == "windows" {
+		return "dproxy.exe"
+	}
+	return "dproxy"
+}
+
+func directBinaryName(item target) string {
+	return fmt.Sprintf("dproxy-%s-%s%s", item.goos, item.goarch, filepath.Ext(executableName(item)))
 }
 
 func buildBinary(tag string, item target, output string) error {

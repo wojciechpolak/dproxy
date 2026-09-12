@@ -8,7 +8,10 @@ import (
 	"crypto/ed25519"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+
+	"github.com/wojciechpolak/dproxy/internal/privatepath"
 )
 
 func TestLoadOrCreateIdentityPersistsEd25519Key(t *testing.T) {
@@ -21,8 +24,11 @@ func TestLoadOrCreateIdentityPersistsEd25519Key(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
-	if got := info.Mode().Perm(); got != 0o600 {
+	if got := info.Mode().Perm(); runtime.GOOS != "windows" && got != 0o600 {
 		t.Errorf("identity mode = %#o, want 0600", got)
+	}
+	if err := privatepath.Validate(path, info); err != nil {
+		t.Errorf("identity permissions: %v", err)
 	}
 	if _, ok := first.Certificate.PrivateKey.(ed25519.PrivateKey); !ok {
 		t.Errorf("private key = %T, want Ed25519", first.Certificate.PrivateKey)
@@ -41,11 +47,13 @@ func TestLoadIdentityRejectsOpenPermissionsAndMalformedPEM(t *testing.T) {
 	if err := os.WriteFile(path, []byte("not PEM"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	if _, err := LoadIdentity(path); err == nil {
-		t.Fatal("LoadIdentity accepted group-readable key material")
+	if runtime.GOOS != "windows" {
+		if _, err := LoadIdentity(path); err == nil {
+			t.Fatal("LoadIdentity accepted group-readable key material")
+		}
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		t.Fatalf("Chmod: %v", err)
+	if err := privatepath.Restrict(path, false); err != nil {
+		t.Fatalf("protect identity: %v", err)
 	}
 	if _, err := LoadIdentity(path); err == nil {
 		t.Fatal("LoadIdentity accepted malformed PEM")
@@ -64,6 +72,9 @@ func TestIdentityFileBoundaryErrors(t *testing.T) {
 	if err := os.WriteFile(oversized, bytes.Repeat([]byte{'x'}, maxIdentityFileBytes+1), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
+	if err := privatepath.Restrict(oversized, false); err != nil {
+		t.Fatalf("protect oversized identity: %v", err)
+	}
 	if _, err := LoadIdentity(oversized); err == nil {
 		t.Fatal("oversized identity was accepted")
 	}
@@ -71,12 +82,18 @@ func TestIdentityFileBoundaryErrors(t *testing.T) {
 	if err := os.WriteFile(parentFile, []byte("x"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
+	if err := privatepath.Restrict(parentFile, false); err != nil {
+		t.Fatalf("protect parent file: %v", err)
+	}
 	if _, err := LoadOrCreateIdentity(filepath.Join(parentFile, "identity.pem")); err == nil {
 		t.Fatal("identity creation under a regular file succeeded")
 	}
 	malformed := filepath.Join(t.TempDir(), "malformed.pem")
 	if err := os.WriteFile(malformed, []byte("not PEM"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := privatepath.Restrict(malformed, false); err != nil {
+		t.Fatalf("protect malformed identity: %v", err)
 	}
 	if _, err := LoadOrCreateIdentity(malformed); err == nil {
 		t.Fatal("LoadOrCreateIdentity replaced a malformed identity")

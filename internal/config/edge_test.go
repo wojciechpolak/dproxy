@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -151,13 +152,16 @@ func TestTokenSetFileErrorPaths(t *testing.T) {
 		t.Fatal("token directory was accepted")
 	}
 	open := writeToken(t, secret, 0o644)
-	if _, err := open.ReadSet(); err == nil {
-		t.Fatal("open token-file permissions were accepted")
+	if runtime.GOOS != "windows" {
+		if _, err := open.ReadSet(); err == nil {
+			t.Fatal("open token-file permissions were accepted")
+		}
 	}
 	oversized := filepath.Join(t.TempDir(), "oversized")
 	if err := os.WriteFile(oversized, bytes.Repeat([]byte{'x'}, MaxServerTokens*(maxTokenBytes+1)+1), 0o600); err != nil {
 		t.Fatalf("write oversized token file: %v", err)
 	}
+	protectTestFile(t, oversized)
 	if _, err := TokenFile(oversized).ReadSet(); err == nil {
 		t.Fatal("oversized token file was accepted")
 	}
@@ -173,7 +177,11 @@ func TestTokenSetFileErrorPaths(t *testing.T) {
 
 func TestExpandPathHandlesHomeItself(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	homeVariable := "HOME"
+	if runtime.GOOS == "windows" {
+		homeVariable = "USERPROFILE"
+	}
+	t.Setenv(homeVariable, home)
 	got, err := expandPath("~")
 	if err != nil {
 		t.Fatalf("expandPath: %v", err)

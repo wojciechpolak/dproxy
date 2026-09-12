@@ -9,6 +9,8 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Native Windows amd64 and arm64 CLI binaries, Windows configuration discovery,
+  private ACL validation for credentials, and Windows CI coverage.
 - A fixture-only `make benchmark` harness for tunnel setup, steady-state
   throughput, concurrent-session throughput, live-session heap, CPU and
   allocation profiles, and the production remote Docker image.

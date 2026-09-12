@@ -338,7 +338,7 @@ func safeTokenFileError(err error) error {
 	text := err.Error()
 	switch {
 	case strings.Contains(text, "permissions"):
-		return errors.New("token file permissions are too open; use 0600")
+		return errors.New("token file permissions are too open; restrict access to the current user")
 	case strings.Contains(text, "at least"):
 		return fmt.Errorf("token is shorter than %d bytes", config.MinTokenBytes)
 	case strings.Contains(text, " is a directory"):
