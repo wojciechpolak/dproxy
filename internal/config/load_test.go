@@ -7,6 +7,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -342,15 +343,21 @@ max_sessions = 7
 	}
 }
 
-func TestUserConfigDirFallsBackToDotConfig(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+func TestUserConfigDirUsesThePlatformDefault(t *testing.T) {
+	base := t.TempDir()
+	want := filepath.Join(base, ".config")
+	if runtime.GOOS == "windows" {
+		t.Setenv("AppData", base)
+		want = base
+	} else {
+		t.Setenv("HOME", base)
+	}
 	t.Setenv("XDG_CONFIG_HOME", "")
 	dir, err := userConfigDir()
 	if err != nil {
 		t.Fatalf("userConfigDir() = %v", err)
 	}
-	if want := filepath.Join(home, ".config"); dir != want {
+	if dir != want {
 		t.Errorf("userConfigDir() = %q, want %q", dir, want)
 	}
 }

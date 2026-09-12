@@ -20,6 +20,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows:
+    name: Windows tests
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: tools/go.sum
+
+      - name: Run Windows tests
+        run: go test ./...
+
+      - name: Run the Windows binary
+        run: |
+          go build -trimpath -o dproxy.exe ./cmd/dproxy
+          .\dproxy.exe --version
+
   # Formatting, the dependency policy, module tidiness, and static analysis.
   # These fail fast and read clearly in a diff, so they are one job rather
   # than five.

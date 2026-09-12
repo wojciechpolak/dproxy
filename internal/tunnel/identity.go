@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/wojciechpolak/dproxy/internal/config"
+	"github.com/wojciechpolak/dproxy/internal/privatepath"
 )
 
 const identityValidity = 10 * 365 * 24 * time.Hour
@@ -47,8 +48,19 @@ func LoadOrCreateIdentity(path string) (*Identity, error) {
 	if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	parent := filepath.Dir(path)
+	_, statErr := os.Stat(parent)
+	parentMissing := errors.Is(statErr, os.ErrNotExist)
+	if statErr != nil && !parentMissing {
+		return nil, fmt.Errorf("stat identity directory: %w", statErr)
+	}
+	if err := os.MkdirAll(parent, 0o700); err != nil {
 		return nil, fmt.Errorf("create identity directory: %w", err)
+	}
+	if parentMissing {
+		if err := privatepath.Restrict(parent, true); err != nil {
+			return nil, fmt.Errorf("protect identity directory: %w", err)
+		}
 	}
 	encoded, err := generateIdentityPEM(time.Now())
 	if err != nil {
@@ -60,6 +72,11 @@ func LoadOrCreateIdentity(path string) (*Identity, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("create inner TLS identity: %w", err)
+	}
+	if err := privatepath.Restrict(path, false); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("protect inner TLS identity: %w", err)
 	}
 	writeErr := writeFull(file, encoded)
 	if writeErr == nil {
@@ -76,7 +93,7 @@ func LoadOrCreateIdentity(path string) (*Identity, error) {
 }
 
 // LoadIdentity reads a PEM identity and rejects permissions that expose its
-// private key to group or other users.
+// private key to other users.
 func LoadIdentity(path string) (*Identity, error) {
 	// #nosec G304 -- path is the operator's configured identity file.
 	file, err := os.Open(path)
@@ -91,8 +108,8 @@ func LoadIdentity(path string) (*Identity, error) {
 	if info.IsDir() {
 		return nil, fmt.Errorf("inner TLS identity %s is a directory", path)
 	}
-	if info.Mode().Perm()&0o077 != 0 {
-		return nil, fmt.Errorf("inner TLS identity %s permissions %#o are too open; use 0600", path, info.Mode().Perm())
+	if err := privatepath.Validate(path, info); err != nil {
+		return nil, fmt.Errorf("inner TLS identity: %w", err)
 	}
 	if info.Size() > maxIdentityFileBytes {
 		return nil, fmt.Errorf("inner TLS identity %s is larger than %d bytes", path, maxIdentityFileBytes)

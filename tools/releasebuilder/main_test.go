@@ -14,8 +14,8 @@ import (
 )
 
 func TestParseTargets(t *testing.T) {
-	want := []target{{goos: "darwin", goarch: "arm64"}, {goos: "linux", goarch: "amd64"}}
-	got, err := parseTargets("darwin/arm64, linux/amd64")
+	want := []target{{goos: "darwin", goarch: "arm64"}, {goos: "linux", goarch: "amd64"}, {goos: "windows", goarch: "arm64"}}
+	got, err := parseTargets("darwin/arm64, linux/amd64, windows/arm64")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,6 +25,25 @@ func TestParseTargets(t *testing.T) {
 	for _, value := range []string{"", "darwin", "darwin/arm64/extra", "darwin/arm64,darwin/arm64"} {
 		if _, err := parseTargets(value); err == nil {
 			t.Errorf("parseTargets(%q) unexpectedly succeeded", value)
+		}
+	}
+}
+
+func TestTargetExecutableNames(t *testing.T) {
+	cases := []struct {
+		target     target
+		executable string
+		direct     string
+	}{
+		{target{goos: "darwin", goarch: "arm64"}, "dproxy", "dproxy-darwin-arm64"},
+		{target{goos: "windows", goarch: "amd64"}, "dproxy.exe", "dproxy-windows-amd64.exe"},
+	}
+	for _, tc := range cases {
+		if got := executableName(tc.target); got != tc.executable {
+			t.Errorf("executableName(%+v) = %q, want %q", tc.target, got, tc.executable)
+		}
+		if got := directBinaryName(tc.target); got != tc.direct {
+			t.Errorf("directBinaryName(%+v) = %q, want %q", tc.target, got, tc.direct)
 		}
 	}
 }

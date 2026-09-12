@@ -67,7 +67,7 @@ type commonOptions struct {
 func (o *commonOptions) register(fs *flag.FlagSet, defaultTokenFile string) {
 	defaults := DefaultTimeouts()
 	log := DefaultLogOptions()
-	fs.StringVar(&o.configFile, "config", "", "path to a TOML configuration file; defaults under $XDG_CONFIG_HOME/dproxy or ~/.config/dproxy")
+	fs.StringVar(&o.configFile, "config", "", "path to a TOML configuration file; defaults under the per-user dproxy configuration directory")
 	fs.StringVar(&o.tokenFile, "token-file", defaultTokenFile, "path to the file holding the shared secret")
 	fs.StringVar(&o.dohURL, "doh-url", DefaultDoHURL, "DoH resolver endpoint; there is no OS-DNS fallback")
 	fs.Var(&o.dohBootstrap, "doh-bootstrap", "IP address the DoH endpoint is dialed at; repeat to add more")
@@ -123,7 +123,7 @@ func RegisterServerFlags(fs *flag.FlagSet) *ServerOptions {
 	options := &ServerOptions{flags: fs}
 	options.register(fs, "")
 	fs.StringVar(&options.listen, "listen", DefaultServerListen, "private address for the WebSocket ingress")
-	fs.StringVar(&options.identityFile, "identity-file", defaultServerIdentityFile(), "persistent inner TLS identity file; created with mode 0600 when absent")
+	fs.StringVar(&options.identityFile, "identity-file", defaultServerIdentityFile(), "persistent inner TLS identity file; restricted to the current user when created")
 	fs.IntVar(&options.maxSessions, "max-sessions", limits.MaxSessions, "maximum concurrently relayed sessions")
 	fs.IntVar(&options.maxControlMsgLength, "max-control-message", limits.MaxControlMessageBytes, "maximum size of one control message in bytes")
 	return options
@@ -547,22 +547,6 @@ func resolveConfigFile(explicit string, role Mode) (path string, required bool, 
 		return "", false, fmt.Errorf("locate config directory: %w", err)
 	}
 	return filepath.Join(dir, "dproxy", role.String()+".toml"), false, nil
-}
-
-// userConfigDir follows XDG_CONFIG_HOME on every supported operating system.
-// When it is unset, dproxy uses ~/.config, including on macOS.
-func userConfigDir() (string, error) {
-	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-		if !filepath.IsAbs(dir) {
-			return "", fmt.Errorf("XDG_CONFIG_HOME must be an absolute path, got %q", dir)
-		}
-		return dir, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config"), nil
 }
 
 // defaultClientTokenFile is the per-user location of the shared secret. A path

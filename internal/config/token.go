@@ -8,10 +8,11 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
 	"strings"
+
+	"github.com/wojciechpolak/dproxy/internal/privatepath"
 )
 
 // MinTokenBytes is the shortest shared secret dproxy accepts. A shorter file
@@ -159,7 +160,7 @@ func (f TokenFile) Read() (Token, error) {
 	if info.IsDir() {
 		return Token{}, fmt.Errorf("token file %s is a directory", f)
 	}
-	if permissionErr := checkTokenPermissions(info.Mode()); permissionErr != nil {
+	if permissionErr := privatepath.Validate(string(f), info); permissionErr != nil {
 		return Token{}, fmt.Errorf("token file %s: %w", f, permissionErr)
 	}
 	if info.Size() > maxTokenBytes {
@@ -191,7 +192,7 @@ func (f TokenFile) ReadSet() (TokenSet, error) {
 	if info.IsDir() {
 		return TokenSet{}, fmt.Errorf("token file %s is a directory", f)
 	}
-	if permissionErr := checkTokenPermissions(info.Mode()); permissionErr != nil {
+	if permissionErr := privatepath.Validate(string(f), info); permissionErr != nil {
 		return TokenSet{}, fmt.Errorf("token file %s: %w", f, permissionErr)
 	}
 	maxFileBytes := int64(MaxServerTokens * (maxTokenBytes + 1))
@@ -220,12 +221,4 @@ func (f TokenFile) ReadSet() (TokenSet, error) {
 		return TokenSet{}, fmt.Errorf("token file %s: %w", f, err)
 	}
 	return set, nil
-}
-
-// checkTokenPermissions rejects a secret that group or others can read.
-func checkTokenPermissions(mode fs.FileMode) error {
-	if mode&0o077 != 0 {
-		return fmt.Errorf("permissions %#o are too open; use 0600", mode.Perm())
-	}
-	return nil
 }

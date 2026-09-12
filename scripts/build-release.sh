@@ -11,7 +11,7 @@ fi
 
 tag="$1"
 output="${2:-dist}"
-targets="${3:-darwin/arm64,darwin/amd64,linux/arm64,linux/amd64}"
+targets="${3:-darwin/arm64,darwin/amd64,linux/arm64,linux/amd64,windows/arm64,windows/amd64}"
 
 go run ./tools/releasebuilder/main.go \
     -tag "$tag" \

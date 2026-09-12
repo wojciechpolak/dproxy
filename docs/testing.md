@@ -18,6 +18,10 @@ main test targets are:
 | `make e2e-cloudflare`  | Public deployment and packet-capture checks |
 | `make benchmark`       | Fixture tunnel setup and throughput         |
 
+GitHub Actions also runs `go test ./...` and the built CLI on a native Windows
+amd64 runner. Release builds cross-compile and package both Windows amd64 and
+arm64 binaries.
+
 The deterministic topology uses generated credentials and local fixtures. It
 tests byte preservation, streaming, half-close, cancellation, deadlines,
 backpressure, policy rejection, and the absence of plaintext secrets after the

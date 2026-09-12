@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -146,9 +147,7 @@ func TestDiagnoseInnerReportsPinnedAuthentication(t *testing.T) {
 		t.Fatal(err)
 	}
 	tokenPath := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(tokenPath, []byte(tokenText), 0o600); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
+	writePrivateTestFile(t, tokenPath, tokenText)
 	clientRaw, serverRaw := net.Pipe()
 	serverResult := make(chan error, 1)
 	go func() {
@@ -267,20 +266,20 @@ func TestSafeTokenFileErrorDoesNotRevealThePath(t *testing.T) {
 		t.Fatalf("safe token error = %q", detail)
 	}
 
-	tooOpen := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(tooOpen, []byte(strings.Repeat("x", config.MinTokenBytes)), 0o644); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
-	_, err = config.TokenFile(tooOpen).Read()
-	if got := safeTokenFileError(err).Error(); got != "token file permissions are too open; use 0600" {
-		t.Fatalf("permission error = %q", got)
+	if runtime.GOOS != "windows" {
+		tooOpen := filepath.Join(t.TempDir(), "token")
+		if err := os.WriteFile(tooOpen, []byte(strings.Repeat("x", config.MinTokenBytes)), 0o644); err != nil {
+			t.Fatalf("write token: %v", err)
+		}
+		_, err = config.TokenFile(tooOpen).Read()
+		if got := safeTokenFileError(err).Error(); got != "token file permissions are too open; restrict access to the current user" {
+			t.Fatalf("permission error = %q", got)
+		}
 	}
 
 	t.Run("short", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "token")
-		if err := os.WriteFile(path, []byte("short"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		writePrivateTestFile(t, path, "short")
 		_, err := config.TokenFile(path).Read()
 		if got := safeTokenFileError(err).Error(); got != "token is shorter than 32 bytes" {
 			t.Fatalf("short token error = %q", got)
@@ -294,9 +293,7 @@ func TestSafeTokenFileErrorDoesNotRevealThePath(t *testing.T) {
 	})
 	t.Run("large", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "token")
-		if err := os.WriteFile(path, []byte(strings.Repeat("x", 5000)), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		writePrivateTestFile(t, path, strings.Repeat("x", 5000))
 		_, err := config.TokenFile(path).Read()
 		if got := safeTokenFileError(err).Error(); got != "token file is too large" {
 			t.Fatalf("large token error = %q", got)

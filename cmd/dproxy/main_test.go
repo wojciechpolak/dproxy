@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/wojciechpolak/dproxy/internal/privatepath"
 )
 
 func TestMain(m *testing.M) {
@@ -28,6 +30,16 @@ func TestMain(m *testing.M) {
 type capture struct {
 	stdout strings.Builder
 	stderr strings.Builder
+}
+
+func writePrivateTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write private test file: %v", err)
+	}
+	if err := privatepath.Restrict(path, false); err != nil {
+		t.Fatalf("protect private test file: %v", err)
+	}
 }
 
 func invoke(args ...string) (exitCode, *capture) {
@@ -146,9 +158,7 @@ func TestClientRejectsANonLoopbackListener(t *testing.T) {
 func TestClientStartsAndStopsOnContextCancellation(t *testing.T) {
 	tokenPath := filepath.Join(t.TempDir(), "token")
 	token := "0123456789abcdef0123456789abcdef"
-	if err := os.WriteFile(tokenPath, []byte(token), 0o600); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
+	writePrivateTestFile(t, tokenPath, token)
 	probe, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("find free address: %v", err)
@@ -189,9 +199,7 @@ func TestClientReportsStartupAndBindFailures(t *testing.T) {
 	}
 
 	tokenPath := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(tokenPath, []byte("0123456789abcdef0123456789abcdef"), 0o600); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
+	writePrivateTestFile(t, tokenPath, "0123456789abcdef0123456789abcdef")
 	occupied, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
@@ -217,9 +225,7 @@ func TestServerRequiresATokenFile(t *testing.T) {
 func TestServerStartsAndStopsOnContextCancellation(t *testing.T) {
 	tokenPath := filepath.Join(t.TempDir(), "token")
 	token := "0123456789abcdef0123456789abcdef"
-	if err := os.WriteFile(tokenPath, []byte(token), 0o600); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
+	writePrivateTestFile(t, tokenPath, token)
 	identityPath := filepath.Join(t.TempDir(), "identity.pem")
 	probe, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -258,9 +264,7 @@ func TestServerReportsStartupAndBindFailures(t *testing.T) {
 	}
 
 	tokenPath := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(tokenPath, []byte("0123456789abcdef0123456789abcdef"), 0o600); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
+	writePrivateTestFile(t, tokenPath, "0123456789abcdef0123456789abcdef")
 	occupied, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("Listen: %v", err)

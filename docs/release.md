@@ -1,7 +1,7 @@
 # Releases
 
-Stable releases publish binaries and archives for macOS and Linux on arm64 and
-amd64, plus a multi-platform remote-server image at
+Stable releases publish binaries and archives for macOS, Linux, and Windows on
+arm64 and amd64, plus a multi-platform remote-server image at
 `ghcr.io/wojciechpolak/dproxy`. Each release includes SHA-256 checksums and
 GitHub build attestations. The container image also includes an attested SPDX
 software bill of materials. The GitHub release body is the matching version's
@@ -37,6 +37,10 @@ gh attestation verify "oci://ghcr.io/wojciechpolak/dproxy:${image_tag}" \
   --repo wojciechpolak/dproxy
 docker pull "ghcr.io/wojciechpolak/dproxy:${image_tag}"
 ```
+
+Windows binaries use names such as `dproxy-windows-amd64.exe`. Their matching
+archives contain `dproxy.exe` and `LICENSE`. Verify the `.exe` against
+`SHA256SUMS` and its GitHub build attestation before installing it.
 
 ## Reproduce the release files
 
