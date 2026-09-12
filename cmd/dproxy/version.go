@@ -12,7 +12,7 @@ import (
 
 // sourceVersion is the version recorded in the source tree. The version bump
 // tool keeps it in sync with the repository's VERSION file.
-const sourceVersion = "v1.0.0"
+const sourceVersion = "v1.1.0"
 
 // version is the release version. A release build sets it with
 // -ldflags "-X main.version=v1.2.3".

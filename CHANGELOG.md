@@ -7,6 +7,8 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-12
+
 ### Added
 
 - Native Windows amd64 and arm64 CLI binaries, Windows configuration discovery,
