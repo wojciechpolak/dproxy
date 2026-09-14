@@ -74,8 +74,17 @@ jobs:
       - name: Dependency policy
         run: make deps-check
 
+      - name: Extra analyzers
+        run: make analyze
+
       - name: staticcheck
         run: make staticcheck
+
+      - name: errcheck
+        run: make errcheck
+
+      - name: Cyclomatic complexity
+        run: make gocyclo
 
       - name: deadcode
         run: make deadcode

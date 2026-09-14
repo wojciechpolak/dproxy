@@ -32,6 +32,12 @@ $(BIN)/goimports: $(TOOLS)/go.mod $(TOOLS)/go.sum
 $(BIN)/deadcode: $(TOOLS)/go.mod $(TOOLS)/go.sum
 	$(GO) -C $(TOOLS) build -o ../$(BIN)/deadcode golang.org/x/tools/cmd/deadcode
 
+$(BIN)/errcheck: $(TOOLS)/go.mod $(TOOLS)/go.sum
+	$(GO) -C $(TOOLS) build -o ../$(BIN)/errcheck github.com/kisielk/errcheck
+
+$(BIN)/gocyclo: $(TOOLS)/go.mod $(TOOLS)/go.sum
+	$(GO) -C $(TOOLS) build -o ../$(BIN)/gocyclo github.com/fzipp/gocyclo/cmd/gocyclo
+
 $(BIN)/markdownfmt: $(TOOLS)/go.mod $(TOOLS)/go.sum
 	$(GO) -C $(TOOLS) build -o ../$(BIN)/markdownfmt github.com/Kunde21/markdownfmt/v3/cmd/markdownfmt
 
@@ -46,8 +52,13 @@ $(BIN)/govulncheck: $(TOOLS)/go.mod $(TOOLS)/go.sum
 $(BIN)/mdwrap: $(TOOLS)/go.mod $(TOOLS)/mdwrap/main.go
 	$(GO) -C $(TOOLS) build -o ../$(BIN)/mdwrap ./mdwrap
 
+# analyze bundles the x/tools analyzers that go vet does not enable by default.
+# x/tools is already pinned here, so this costs no new modules.
+$(BIN)/analyze: $(TOOLS)/go.mod $(TOOLS)/go.sum $(TOOLS)/analyze/main.go
+	$(GO) -C $(TOOLS) build -o ../$(BIN)/analyze ./analyze
+
 .PHONY: tools
-tools: $(BIN)/goimports $(BIN)/deadcode $(BIN)/markdownfmt $(BIN)/staticcheck $(BIN)/govulncheck $(BIN)/mdwrap ## Build the development tools
+tools: $(BIN)/goimports $(BIN)/deadcode $(BIN)/markdownfmt $(BIN)/staticcheck $(BIN)/govulncheck $(BIN)/mdwrap $(BIN)/analyze $(BIN)/errcheck $(BIN)/gocyclo ## Build the development tools
 
 .PHONY: build
 build: ## Compile every package and write bin/dproxy
@@ -100,16 +111,38 @@ md-check: $(BIN)/markdownfmt $(BIN)/mdwrap ## Fail if Markdown is unformatted or
 	./scripts/check-markdown.sh $(BIN)/markdownfmt $(BIN)/mdwrap
 
 .PHONY: vet
-vet: ## Run go vet
+vet: ## Run go vet over both modules
 	$(GO) vet ./...
+	$(GO) -C $(TOOLS) vet ./...
 
 .PHONY: staticcheck
-staticcheck: $(BIN)/staticcheck ## Run staticcheck
+staticcheck: $(BIN)/staticcheck ## Run staticcheck over both modules
 	$(BIN)/staticcheck ./...
+	cd $(TOOLS) && ../$(BIN)/staticcheck ./...
 
 .PHONY: deadcode
 deadcode: $(BIN)/deadcode ## Report unreachable functions from the dproxy command and its tests
 	$(BIN)/deadcode -test ./cmd/dproxy
+
+.PHONY: analyze
+analyze: $(BIN)/analyze ## Run the analyzers go vet leaves out, over both modules
+	$(GO) vet -vettool=$(CURDIR)/$(BIN)/analyze ./...
+	$(GO) -C $(TOOLS) vet -vettool=$(CURDIR)/$(BIN)/analyze ./...
+
+# The exclude list is writes to stderr and usage writers, where a failed write
+# has nowhere to go. -asserts also fails on unchecked type assertions. -blank is
+# not used, because a `_ =` in this repository is always deliberate.
+.PHONY: errcheck
+errcheck: $(BIN)/errcheck ## Fail on unchecked errors and type assertions
+	$(BIN)/errcheck -asserts -exclude scripts/errcheck-excludes.txt ./...
+	cd $(TOOLS) && ../$(BIN)/errcheck -asserts -exclude ../scripts/errcheck-excludes.txt ./...
+
+# 30 is the current worst function (config.ClientOptions.Load), so this blocks
+# new complexity without demanding a refactor first. Lower it after splitting
+# the six functions above 20.
+.PHONY: gocyclo
+gocyclo: $(BIN)/gocyclo ## Fail if any function exceeds the complexity ceiling
+	$(BIN)/gocyclo -over 30 ./cmd ./internal ./tools
 
 .PHONY: test
 test: ## Run the unit tests
@@ -133,7 +166,7 @@ vuln: $(BIN)/govulncheck ## Check the product module for known vulnerabilities
 
 .PHONY: vuln-tools
 vuln-tools: tools ## Check the built development tools for known vulnerabilities
-	@for tool in $(BIN)/goimports $(BIN)/deadcode $(BIN)/markdownfmt $(BIN)/staticcheck $(BIN)/govulncheck; do \
+	@for tool in $(BIN)/goimports $(BIN)/deadcode $(BIN)/markdownfmt $(BIN)/staticcheck $(BIN)/govulncheck $(BIN)/analyze $(BIN)/errcheck $(BIN)/gocyclo; do \
 		echo "==> $$tool"; \
 		$(BIN)/govulncheck -mode=binary "$$tool" || exit 1; \
 	done
@@ -206,7 +239,7 @@ clean: ## Remove built binaries
 	rm -rf $(BIN)
 
 .PHONY: check
-check: fmt-check md-check deps-check tidy-check vet staticcheck deadcode build test coverage test-tools race vuln release-check ## Run the full local gate
+check: fmt-check md-check deps-check tidy-check vet analyze staticcheck errcheck gocyclo deadcode build test coverage test-tools race vuln release-check ## Run the full local gate
 
 # ci is what the workflows run: the same gate plus the end-to-end suite.
 .PHONY: ci

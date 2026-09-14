@@ -100,7 +100,7 @@ func TestWriteArchiveIsDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer input.Close()
+	defer func() { _ = input.Close() }()
 	gzipReader, err := gzip.NewReader(input)
 	if err != nil {
 		t.Fatal(err)
