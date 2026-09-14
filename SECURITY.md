@@ -43,7 +43,11 @@ terminates the original application TLS connection and sees its contents.
   connection without ECH.
 - **The private channel is pinned.** Local and remote dproxy establish inner TLS
   1.3. The client verifies the remote's SPKI pin before sending the shared
-  token, destination, or application bytes.
+  token, destination, or application bytes. The remote can require the reverse,
+  making the session mutual TLS (mTLS): with `client_pins` configured it demands
+  a client certificate whose SPKI is pinned and aborts the handshake before
+  reading `HELLO`. That requirement is additional to the token and never a
+  replacement for it.
 - **Authentication precedes network access.** The remote compares token digests
   in constant time and rejects an invalid token before resolving or dialing a
   destination. One previous token may remain active during rotation.
@@ -114,7 +118,11 @@ host to be compromised first usually inherits that existing compromise.
   need a narrower policy. The remote list is authoritative.
 - A stolen token authorizes relay use until rotation. A stolen remote identity
   key can impersonate that identity. Compromise of both permits a replacement
-  relay to authenticate to clients and accept their sessions.
+  relay to authenticate to clients and accept their sessions. Configuring
+  `client_pins` additionally requires a pinned client key, so a stolen token
+  alone is then insufficient. No client certificate is required by default, and
+  a pinned client key stays authorized until its pin is removed: certificate
+  expiry is not checked.
 
 See [`docs/threat-model.md`](docs/threat-model.md) for the complete disclosure
 matrix, residual risks, and compromise assumptions.

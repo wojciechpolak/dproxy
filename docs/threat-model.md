@@ -30,25 +30,29 @@ WebSocket peers, and local `CONNECT` requests are untrusted input.
 | Provider               | Remote host address and the original application request                    |
 
 The inner TLS layer prevents the front-end operator from reading `HELLO`,
-`OPEN`, the token, the provider hostname, or application bytes. ECH does not
-hide the connection to the front-end service or its timing.
+`OPEN`, the token, the provider hostname, or application bytes. A pinned client
+certificate, when one is configured, is sent after the remote's Finished message
+and is encrypted under the handshake keys, so the front-end operator learns
+nothing new from it. ECH does not hide the connection to the front-end service
+or its timing.
 
 ## Threats and controls
 
-| Threat                                                | Control                                                                                             | Residual risk                                                            |
-|-------------------------------------------------------|-----------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------|
-| Local DNS monitoring reveals the relay                | In-process DoH with configured bootstrap addresses and no OS resolver fallback                      | The DoH endpoint remains visible                                         |
-| Outer SNI reveals the relay                           | ECH is mandatory and rejection is fatal                                                             | The shared ECH public name remains visible                               |
-| Transport downgrade                                   | Both outer and inner TLS require version 1.3                                                        | Future TLS policy changes need review                                    |
-| The WSS front end reads tunnel control data           | Pinned inner TLS encloses the token, destination, and application stream                            | The front end still sees connection metadata                             |
-| A false remote steals the token                       | The client checks the remote SPKI pin before sending `HELLO`                                        | A stolen identity key defeats this check                                 |
-| Unauthorized users turn the remote into an open proxy | A high-entropy token is required before `OPEN`, failures are rate-limited, and sessions are bounded | A stolen token works until rotation                                      |
-| A compromised local client requests arbitrary targets | Port 443 is fixed, private addresses are blocked, and operators can configure allowlists            | The default policy permits any public hostname                           |
-| DNS rebinding reaches private services                | The remote classifies every DoH answer before dialing                                               | A public address may route to infrastructure the operator did not intend |
-| Parser input causes memory or state abuse             | HTTP and control messages have size limits, explicit types, and strict versioning                   | Long valid streams still consume one session each                        |
-| Slow or abandoned sessions exhaust capacity           | Idle, lifetime, concurrent-session, and shutdown limits                                             | Operators may disable idle or lifetime limits for long provider streams  |
-| Logs disclose secrets or destinations                 | Secret keys are always redacted and target logging is opt-in                                        | Host operators can inspect process memory and network metadata           |
-| The WSS front end redirects a tunnel                  | The WebSocket client rejects redirects                                                              | The front end still chooses its edge and origin routing                  |
+| Threat                                                | Control                                                                                                                                                                    | Residual risk                                                                                                                                                                                                     |
+|-------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Local DNS monitoring reveals the relay                | In-process DoH with configured bootstrap addresses and no OS resolver fallback                                                                                             | The DoH endpoint remains visible                                                                                                                                                                                  |
+| Outer SNI reveals the relay                           | ECH is mandatory and rejection is fatal                                                                                                                                    | The shared ECH public name remains visible                                                                                                                                                                        |
+| Transport downgrade                                   | Both outer and inner TLS require version 1.3                                                                                                                               | Future TLS policy changes need review                                                                                                                                                                             |
+| The WSS front end reads tunnel control data           | Pinned inner TLS encloses the token, destination, and application stream                                                                                                   | The front end still sees connection metadata                                                                                                                                                                      |
+| A false remote steals the token                       | The client checks the remote SPKI pin before sending `HELLO`                                                                                                               | A stolen identity key defeats this check                                                                                                                                                                          |
+| Unauthorized users turn the remote into an open proxy | A high-entropy token is required before `OPEN`, an optional pinned client certificate can be required in addition, failures are rate-limited, and sessions are bounded     | A stolen token works until rotation, and with no client pins configured the token alone is sufficient                                                                                                             |
+| A stolen token is replayed from another machine       | Optional mTLS: with `client_pins` configured the remote requires a client certificate whose SPKI is pinned, verified inside the inner TLS handshake before `HELLO` is read | A stolen client identity key together with the token still authenticates; a pinned key is valid until its pin is removed, because nothing checks certificate expiry; no client certificate is required by default |
+| A compromised local client requests arbitrary targets | Port 443 is fixed, private addresses are blocked, and operators can configure allowlists                                                                                   | The default policy permits any public hostname                                                                                                                                                                    |
+| DNS rebinding reaches private services                | The remote classifies every DoH answer before dialing                                                                                                                      | A public address may route to infrastructure the operator did not intend                                                                                                                                          |
+| Parser input causes memory or state abuse             | HTTP and control messages have size limits, explicit types, and strict versioning                                                                                          | Long valid streams still consume one session each                                                                                                                                                                 |
+| Slow or abandoned sessions exhaust capacity           | Idle, lifetime, concurrent-session, and shutdown limits                                                                                                                    | Operators may disable idle or lifetime limits for long provider streams                                                                                                                                           |
+| Logs disclose secrets or destinations                 | Secret keys are always redacted and target logging is opt-in                                                                                                               | Host operators can inspect process memory and network metadata                                                                                                                                                    |
+| The WSS front end redirects a tunnel                  | The WebSocket client rejects redirects                                                                                                                                     | The front end still chooses its edge and origin routing                                                                                                                                                           |
 
 ## Compromise assumptions
 
@@ -62,9 +66,19 @@ relay to authenticate to clients and accept their sessions. Treat either file as
 an incident and follow the rotation steps in the
 [deployment guide](deployment.md#rotate-credentials).
 
+A compromised local process can also read the client identity key when one is
+configured. Compromise of a client identity key together with the token permits
+relay use from another machine until the pin is removed from `client_pins` and
+the token is rotated. Removing one client's pin does not affect the others.
+
 ## Security review triggers
 
 Review this model before adding another listener type, destination port,
 authentication method, transport fallback, public remote listener, protocol
 message, multiplexing, application parsing, or provider-specific transport
 branch. Those changes alter a trust boundary or a stated security goal.
+
+The optional pinned client certificate added in 1.2.0 was reviewed against this
+model on 2026-09-14. It adds a requirement inside the existing inner TLS
+boundary and introduces no new listener, control message, protocol version, or
+trust boundary; the token remains mandatory in every mode.

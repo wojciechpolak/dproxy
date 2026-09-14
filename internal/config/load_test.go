@@ -578,3 +578,102 @@ func TestLoadRejectsInvalidCommonFlags(t *testing.T) {
 		}
 	}
 }
+
+const testClientPin = "sha256:7c1QJ0h9zqYQ6QhX0v5nLrHZ8m0pQ4aB2cD6eF8gH1I="
+
+func TestLoadServerClientPinsFromFile(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "server.toml")
+	write(t, configPath, `
+token_file  = "/run/secrets/dproxy-token"
+client_pins = ["`+testClientPin+`", "`+testPin+`"]
+`)
+	config, err := loadServer(t, "--config", configPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if config.ClientPins.Len() != 2 {
+		t.Fatalf("ClientPins.Len = %d, want 2", config.ClientPins.Len())
+	}
+}
+
+func TestLoadServerClientPinFlagReplacesTheFileList(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "server.toml")
+	write(t, configPath, `
+token_file  = "/run/secrets/dproxy-token"
+client_pins = ["`+testClientPin+`", "`+testPin+`"]
+`)
+	config, err := loadServer(t, "--config", configPath, "--client-pin", testPin)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if config.ClientPins.Len() != 1 {
+		t.Fatalf("ClientPins.Len = %d, want the flag to replace the file list", config.ClientPins.Len())
+	}
+}
+
+func TestLoadServerRejectsAMalformedClientPin(t *testing.T) {
+	_, err := loadServer(t, "--token-file", "/run/secrets/server-token", "--client-pin", "not-a-pin")
+	if err == nil {
+		t.Fatal("Load accepted a malformed client pin")
+	}
+	if strings.Contains(err.Error(), "not-a-pin") {
+		t.Errorf("error echoed the entry: %v", err)
+	}
+}
+
+func TestLoadServerDefaultsToNoClientPins(t *testing.T) {
+	config, err := loadServer(t, "--token-file", "/run/secrets/server-token")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if config.ClientPins.Len() != 0 {
+		t.Errorf("ClientPins.Len = %d, want 0 by default", config.ClientPins.Len())
+	}
+}
+
+func TestLoadClientIdentityFileFromFlagAndFile(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "client.toml")
+	write(t, configPath, `
+server               = "wss://dproxy.example.com/v1/tunnel"
+server_pin           = "`+testPin+`"
+token_file           = "/run/secrets/dproxy-token"
+client_identity_file = "/from/file/client-identity.pem"
+`)
+	config, err := loadClient(t, "--config", configPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if config.ClientIdentityFile != "/from/file/client-identity.pem" {
+		t.Errorf("ClientIdentityFile = %q", config.ClientIdentityFile)
+	}
+	config, err = loadClient(t, "--config", configPath,
+		"--client-identity-file", "/from/flag/client-identity.pem")
+	if err != nil {
+		t.Fatalf("Load with flag: %v", err)
+	}
+	if config.ClientIdentityFile != "/from/flag/client-identity.pem" {
+		t.Errorf("ClientIdentityFile = %q, want the flag to win", config.ClientIdentityFile)
+	}
+}
+
+func TestLoadClientDefaultsToNoClientIdentity(t *testing.T) {
+	directory := t.TempDir()
+	config, err := loadClient(t,
+		"--server", "wss://dproxy.example.com/v1/tunnel",
+		"--server-pin", testPin,
+		"--token-file", filepath.Join(directory, "token"),
+	)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if config.ClientIdentityFile != "" {
+		t.Errorf("ClientIdentityFile = %q, want empty by default", config.ClientIdentityFile)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("loading the defaults created %d files", len(entries))
+	}
+}

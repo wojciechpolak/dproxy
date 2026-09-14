@@ -151,7 +151,7 @@ func TestDiagnoseInnerReportsPinnedAuthentication(t *testing.T) {
 	clientRaw, serverRaw := net.Pipe()
 	serverResult := make(chan error, 1)
 	go func() {
-		inner, _, err := tunnel.AcceptInnerTLS(context.Background(), serverRaw, identity, time.Second)
+		inner, _, err := tunnel.AcceptInnerTLS(context.Background(), serverRaw, identity, config.PinSet{}, time.Second)
 		if err != nil {
 			serverResult <- err
 			return
@@ -181,7 +181,7 @@ func TestDiagnoseInnerReportsPinnedAuthentication(t *testing.T) {
 	if err := <-serverResult; err != nil {
 		t.Fatalf("server: %v", err)
 	}
-	if result.failed || len(result.checks) != 4 {
+	if result.failed || len(result.checks) != 5 {
 		t.Fatalf("inner diagnostic = %+v", result)
 	}
 	for _, entry := range result.checks {
@@ -237,7 +237,7 @@ func diagnosticInnerPair(t *testing.T, serve func(net.Conn) error) (*tls.Conn, <
 	clientRaw, serverRaw := net.Pipe()
 	serverResult := make(chan error, 1)
 	go func() {
-		inner, _, acceptErr := tunnel.AcceptInnerTLS(context.Background(), serverRaw, identity, time.Second)
+		inner, _, acceptErr := tunnel.AcceptInnerTLS(context.Background(), serverRaw, identity, config.PinSet{}, time.Second)
 		if acceptErr != nil {
 			serverResult <- acceptErr
 			return
@@ -245,7 +245,7 @@ func diagnosticInnerPair(t *testing.T, serve func(net.Conn) error) (*tls.Conn, <
 		defer func() { _ = inner.Close() }()
 		serverResult <- serve(inner)
 	}()
-	inner, info, err := tunnel.DialInnerTLS(t.Context(), clientRaw, identity.Pin, time.Second)
+	inner, info, err := tunnel.DialInnerTLS(t.Context(), clientRaw, identity.Pin, nil, time.Second)
 	if err != nil {
 		t.Fatalf("dial inner TLS: %v", err)
 	}
@@ -351,5 +351,146 @@ func TestPlural(t *testing.T) {
 		if got := plural(test.count, "address", "addresses"); got != test.want {
 			t.Errorf("plural(%d) = %q, want %q", test.count, got, test.want)
 		}
+	}
+}
+
+// diagnoseInnerAgainst runs the inner diagnostic against a remote that pins
+// clients, and returns the report.
+func diagnoseInnerAgainst(t *testing.T, clients config.PinSet, settings *config.ClientConfig) *report {
+	t.Helper()
+	identity, err := tunnel.LoadOrCreateIdentity(filepath.Join(t.TempDir(), "identity.pem"))
+	if err != nil {
+		t.Fatalf("create identity: %v", err)
+	}
+	tokenText := "diagnostic-token-0123456789abcdef"
+	token, err := config.NewToken([]byte(tokenText))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenPath := filepath.Join(t.TempDir(), "token")
+	writePrivateTestFile(t, tokenPath, tokenText)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+	go func() {
+		serverRaw, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer func() { _ = serverRaw.Close() }()
+		inner, _, innerErr := tunnel.AcceptInnerTLS(context.Background(), serverRaw, identity, clients, time.Second)
+		if innerErr != nil {
+			return
+		}
+		defer func() { _ = inner.Close() }()
+		message, decodeErr := protocol.NewDecoder(inner, config.DefaultLimits().MaxControlMessageBytes).Decode()
+		if decodeErr != nil {
+			return
+		}
+		if hello, ok := message.(protocol.Hello); !ok || !hello.Token.Equal(token) {
+			return
+		}
+		_ = protocol.NewEncoder(inner, config.DefaultLimits().MaxControlMessageBytes).Encode(
+			protocol.HelloOK{Version: protocol.Version1},
+		)
+	}()
+	clientRaw, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer func() { _ = clientRaw.Close() }()
+
+	settings.ServerPin = identity.Pin
+	settings.TokenFile = config.TokenFile(tokenPath)
+	settings.Timeouts = config.DefaultTimeouts()
+	result := &report{}
+	diagnoseInner(t.Context(), clientRaw, settings, result)
+	return result
+}
+
+func findCheck(t *testing.T, result *report, label string) check {
+	t.Helper()
+	for _, entry := range result.checks {
+		if entry.label == label {
+			return entry
+		}
+	}
+	t.Fatalf("report has no %q line: %+v", label, result)
+	return check{}
+}
+
+func TestDiagnoseInnerReportsClientPin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "client-identity.pem")
+	identity, err := tunnel.LoadOrCreateClientIdentity(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clients, err := config.NewPinSet(identity.Pin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := diagnoseInnerAgainst(t, clients, &config.ClientConfig{ClientIdentityFile: path})
+	if result.failed {
+		t.Fatalf("diagnostic failed: %+v", result)
+	}
+	if got := findCheck(t, result, checkClientPin); got.detail != identity.Pin.String() {
+		t.Errorf("client pin line = %q, want %q", got.detail, identity.Pin.String())
+	}
+}
+
+func TestDiagnoseInnerReportsNoClientIdentity(t *testing.T) {
+	result := diagnoseInnerAgainst(t, config.PinSet{}, &config.ClientConfig{})
+	if result.failed {
+		t.Fatalf("diagnostic failed: %+v", result)
+	}
+	if got := findCheck(t, result, checkClientPin); got.detail != "not configured" {
+		t.Errorf("client pin line = %q, want %q", got.detail, "not configured")
+	}
+	if got := findCheck(t, result, checkClientPin); got.status != statusOK {
+		t.Errorf("client pin status = %v, want OK; an unconfigured identity is the default", got.status)
+	}
+}
+
+func TestDiagnoseInnerReportsClientIdentityRefusal(t *testing.T) {
+	refused, err := tunnel.LoadOrCreateClientIdentity(filepath.Join(t.TempDir(), "other.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clients, err := config.NewPinSet(refused.Pin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := &config.ClientConfig{
+		ClientIdentityFile: filepath.Join(t.TempDir(), "client-identity.pem"),
+	}
+	result := diagnoseInnerAgainst(t, clients, settings)
+	if !result.failed {
+		t.Fatalf("an unpinned client identity was reported as healthy: %+v", result)
+	}
+	entry := findCheck(t, result, checkAuthentication)
+	if entry.status == statusOK {
+		t.Fatalf("authentication line = %s, want a failure", entry.render())
+	}
+	if !strings.Contains(entry.detail, "client identity") {
+		t.Errorf("authentication detail = %q, want it to name the client identity", entry.detail)
+	}
+}
+
+func TestDiagnoseInnerReportsUnreadableClientIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "client-identity.pem")
+	if err := os.WriteFile(path, []byte("not a PEM identity"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings := &config.ClientConfig{ClientIdentityFile: path}
+	result := diagnoseInnerAgainst(t, config.PinSet{}, settings)
+	if !result.failed {
+		t.Fatalf("an unreadable client identity was reported as healthy: %+v", result)
+	}
+	entry := findCheck(t, result, checkClientPin)
+	if strings.Contains(entry.detail, path) {
+		t.Errorf("client pin detail leaked the path: %q", entry.detail)
 	}
 }

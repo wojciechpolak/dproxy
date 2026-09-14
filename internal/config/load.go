@@ -90,6 +90,7 @@ type ClientOptions struct {
 	listen             string
 	server             string
 	serverPin          string
+	clientIdentityFile string
 	insecureDisableECH bool
 	flags              *flag.FlagSet
 }
@@ -102,6 +103,8 @@ func RegisterClientFlags(fs *flag.FlagSet) *ClientOptions {
 	fs.StringVar(&options.listen, "listen", DefaultClientListen, "loopback address for the CONNECT listener")
 	fs.StringVar(&options.server, "server", "", "public wss:// URL of the remote dproxy")
 	fs.StringVar(&options.serverPin, "server-pin", "", "pinned remote identity, sha256:<base64|hex> of its SPKI")
+	fs.StringVar(&options.clientIdentityFile, "client-identity-file", "",
+		"optional persistent client identity file, created on first use; presented only when the remote requires one")
 	fs.BoolVar(&options.insecureDisableECH, "insecure-disable-ech", false,
 		"INSECURE: connect without ECH, exposing the outer SNI; development only")
 	return options
@@ -112,6 +115,7 @@ type ServerOptions struct {
 	commonOptions
 	listen              string
 	identityFile        string
+	clientPins          stringList
 	maxSessions         int
 	maxControlMsgLength int
 	flags               *flag.FlagSet
@@ -124,6 +128,8 @@ func RegisterServerFlags(fs *flag.FlagSet) *ServerOptions {
 	options.register(fs, "")
 	fs.StringVar(&options.listen, "listen", DefaultServerListen, "private address for the WebSocket ingress")
 	fs.StringVar(&options.identityFile, "identity-file", defaultServerIdentityFile(), "persistent inner TLS identity file; restricted to the current user when created")
+	fs.Var(&options.clientPins, "client-pin",
+		"pinned client identity permitted in addition to the token, sha256:<base64|hex> of its SPKI; repeat to add more")
 	fs.IntVar(&options.maxSessions, "max-sessions", limits.MaxSessions, "maximum concurrently relayed sessions")
 	fs.IntVar(&options.maxControlMsgLength, "max-control-message", limits.MaxControlMessageBytes, "maximum size of one control message in bytes")
 	return options
@@ -153,6 +159,7 @@ var clientKeys = append([]string{
 	"listen",
 	"server",
 	"server_pin",
+	"client_identity_file",
 	"ech",
 }, commonKeys...)
 
@@ -160,6 +167,7 @@ var clientKeys = append([]string{
 var serverKeys = append([]string{
 	"listen",
 	"identity_file",
+	"client_pins",
 	"limits.max_sessions",
 	"limits.max_control_message_bytes",
 }, commonKeys...)
@@ -222,6 +230,7 @@ func (o *ClientOptions) Load() (*ClientConfig, error) {
 	dohURL := DefaultDoHURL
 	relayURL := ""
 	pin := ""
+	clientIdentityFile := ""
 	tokenFile := defaultClientTokenFile()
 	var bootstrap []string
 	allowlist := allowlistSource{}
@@ -242,6 +251,7 @@ func (o *ClientOptions) Load() (*ClientConfig, error) {
 				document.applyString("listen", &config.Listen),
 				document.applyString("server", &relayURL),
 				document.applyString("server_pin", &pin),
+				document.applyString("client_identity_file", &clientIdentityFile),
 				document.applyString("ech", &ech),
 				applyCommonFile(document, &tokenFile, &dohURL, &bootstrap, &allowlist, &config.Timeouts, &config.Log),
 			); err != nil {
@@ -264,6 +274,8 @@ func (o *ClientOptions) Load() (*ClientConfig, error) {
 			relayURL = o.server
 		case "server-pin":
 			pin = o.serverPin
+		case "client-identity-file":
+			clientIdentityFile = o.clientIdentityFile
 		case "token-file":
 			tokenFile = o.tokenFile
 		case "doh-url":
@@ -318,6 +330,10 @@ func (o *ClientOptions) Load() (*ClientConfig, error) {
 		return nil, err
 	}
 	config.TokenFile = TokenFile(expanded)
+	config.ClientIdentityFile, err = expandPath(clientIdentityFile)
+	if err != nil {
+		return nil, err
+	}
 	if err := allowlist.apply(&config.Allowlist); err != nil {
 		return nil, err
 	}
@@ -340,6 +356,7 @@ func (o *ServerOptions) Load() (*ServerConfig, error) {
 	dohURL := DefaultDoHURL
 	tokenFile := ""
 	identityFile := defaultServerIdentityFile()
+	var clientPins []string
 	var bootstrap []string
 	allowlist := allowlistSource{}
 
@@ -357,6 +374,7 @@ func (o *ServerOptions) Load() (*ServerConfig, error) {
 			if err := errors.Join(
 				document.applyString("listen", &config.Listen),
 				document.applyString("identity_file", &identityFile),
+				document.applyStrings("client_pins", &clientPins),
 				document.applyInt("limits.max_sessions", &config.Limits.MaxSessions),
 				document.applyInt("limits.max_control_message_bytes", &config.Limits.MaxControlMessageBytes),
 				applyCommonFile(document, &tokenFile, &dohURL, &bootstrap, &allowlist, &config.Timeouts, &config.Log),
@@ -373,6 +391,8 @@ func (o *ServerOptions) Load() (*ServerConfig, error) {
 			config.Listen = o.listen
 		case "identity-file":
 			identityFile = o.identityFile
+		case "client-pin":
+			clientPins = o.clientPins
 		case "token-file":
 			tokenFile = o.tokenFile
 		case "doh-url":
@@ -417,6 +437,10 @@ func (o *ServerOptions) Load() (*ServerConfig, error) {
 		return nil, err
 	}
 	config.IdentityFile = expandedIdentity
+	config.ClientPins, err = ParsePinSet(clientPins)
+	if err != nil {
+		return nil, err
+	}
 	if err := allowlist.apply(&config.Allowlist); err != nil {
 		return nil, err
 	}

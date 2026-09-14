@@ -189,13 +189,25 @@ func waitForServerStart(t *testing.T, server *Server, serveDone <-chan error) {
 
 func (s *runningServer) dialInner(t *testing.T) net.Conn {
 	t.Helper()
-	websocket := s.dialWebSocket(t)
-	inner, _, err := tunnel.DialInnerTLS(t.Context(), websocket, s.server.IdentityPin(), time.Second)
+	inner, err := s.dialInnerAs(t, nil)
 	if err != nil {
-		_ = websocket.Close()
 		t.Fatalf("DialInnerTLS: %v", err)
 	}
 	return inner
+}
+
+// dialInnerAs offers identity as the client certificate. The dial itself
+// succeeds even when the remote refuses it: TLS 1.3 completes the client
+// handshake first, so a refusal surfaces on the first control message.
+func (s *runningServer) dialInnerAs(t *testing.T, identity *tunnel.Identity) (net.Conn, error) {
+	t.Helper()
+	websocket := s.dialWebSocket(t)
+	inner, _, err := tunnel.DialInnerTLS(t.Context(), websocket, s.server.IdentityPin(), identity, time.Second)
+	if err != nil {
+		_ = websocket.Close()
+		return nil, err
+	}
+	return inner, nil
 }
 
 func (s *runningServer) dialWebSocket(t *testing.T) net.Conn {
@@ -607,3 +619,150 @@ var (
 	_ policy.Resolver = (*testResolver)(nil)
 	_ TargetDialer    = (*testDialer)(nil)
 )
+
+func testClientIdentity(t *testing.T, name string) *tunnel.Identity {
+	t.Helper()
+	identity, err := tunnel.LoadOrCreateClientIdentity(filepath.Join(t.TempDir(), name))
+	if err != nil {
+		t.Fatalf("LoadOrCreateClientIdentity: %v", err)
+	}
+	return identity
+}
+
+func withClientPins(t *testing.T, pins ...config.Pin) func(*config.ServerConfig) {
+	t.Helper()
+	set, err := config.NewPinSet(pins...)
+	if err != nil {
+		t.Fatalf("NewPinSet: %v", err)
+	}
+	return func(settings *config.ServerConfig) { settings.ClientPins = set }
+}
+
+// assertNoProtocolResponse checks that the remote never produced a usable
+// session: nothing decodes, and neither the resolver nor the dialer was
+// reached.
+func assertNoProtocolResponse(t *testing.T, inner net.Conn, resolver *testResolver, dialer *testDialer) {
+	t.Helper()
+	_ = inner.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := protocol.NewDecoder(inner, config.DefaultLimits().MaxControlMessageBytes).Decode(); err == nil {
+		t.Fatal("refused client received a protocol response")
+	}
+	if resolver.callCount() != 0 || dialer.callCount() != 0 {
+		t.Fatalf("refused client reached resolver or dialer: %d, %d", resolver.callCount(), dialer.callCount())
+	}
+}
+
+func TestServerRejectsUnpinnedClientBeforePolicyOrDial(t *testing.T) {
+	resolver := &testResolver{addresses: []netip.Addr{netip.MustParseAddr("1.1.1.1")}}
+	dialer := newTestDialer()
+	running := startTestServerWithConfig(t, resolver, dialer,
+		withClientPins(t, testClientIdentity(t, "pinned.pem").Pin))
+	inner, err := running.dialInnerAs(t, nil)
+	if err != nil {
+		t.Fatalf("DialInnerTLS: %v", err)
+	}
+	defer func() { _ = inner.Close() }()
+	encoder := protocol.NewEncoder(inner, config.DefaultLimits().MaxControlMessageBytes)
+	_ = encoder.Encode(protocol.Hello{Version: protocol.Version1, Token: running.token})
+	assertNoProtocolResponse(t, inner, resolver, dialer)
+}
+
+func TestServerRejectsWrongClientPinBeforePolicyOrDial(t *testing.T) {
+	resolver := &testResolver{addresses: []netip.Addr{netip.MustParseAddr("1.1.1.1")}}
+	dialer := newTestDialer()
+	running := startTestServerWithConfig(t, resolver, dialer,
+		withClientPins(t, testClientIdentity(t, "pinned.pem").Pin))
+	inner, err := running.dialInnerAs(t, testClientIdentity(t, "other.pem"))
+	if err != nil {
+		t.Fatalf("DialInnerTLS: %v", err)
+	}
+	defer func() { _ = inner.Close() }()
+	encoder := protocol.NewEncoder(inner, config.DefaultLimits().MaxControlMessageBytes)
+	_ = encoder.Encode(protocol.Hello{Version: protocol.Version1, Token: running.token})
+	assertNoProtocolResponse(t, inner, resolver, dialer)
+}
+
+func TestServerAcceptsAPinnedClient(t *testing.T) {
+	identity := testClientIdentity(t, "pinned.pem")
+	resolver := &testResolver{addresses: []netip.Addr{netip.MustParseAddr("1.1.1.1")}}
+	dialer := newTestDialer()
+	running := startTestServerWithConfig(t, resolver, dialer, withClientPins(t, identity.Pin))
+	inner, err := running.dialInnerAs(t, identity)
+	if err != nil {
+		t.Fatalf("DialInnerTLS: %v", err)
+	}
+	defer func() { _ = inner.Close() }()
+	encoder, decoder := authenticate(t, inner, running.token)
+	if err := encoder.Encode(protocol.Open{Destination: mustDestination(t, "api.openai.com")}); err != nil {
+		t.Fatalf("encode OPEN: %v", err)
+	}
+	message, err := decoder.Decode()
+	if err != nil {
+		t.Fatalf("decode OPEN response: %v", err)
+	}
+	if _, ok := message.(protocol.OpenOK); !ok {
+		t.Fatalf("OPEN response = %s, want OPEN_OK", message.Type())
+	}
+}
+
+func TestServerMetersClientIdentityFailures(t *testing.T) {
+	resolver := &testResolver{addresses: []netip.Addr{netip.MustParseAddr("1.1.1.1")}}
+	running := startTestServerWithConfig(t, resolver, newTestDialer(),
+		withClientPins(t, testClientIdentity(t, "pinned.pem").Pin))
+	for range authFailureLimit {
+		inner, err := running.dialInnerAs(t, nil)
+		if err != nil {
+			t.Fatalf("DialInnerTLS: %v", err)
+		}
+		_ = inner.Close()
+	}
+	// The remote records each refusal while handling its own request, so the
+	// last ones may still be in flight when the dial returns.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		probe := httptest.NewRequest(http.MethodGet, TunnelPath, nil)
+		probe.RemoteAddr = "127.0.0.1:12345"
+		blocked := httptest.NewRecorder()
+		running.server.ServeHTTP(blocked, probe)
+		if blocked.Code == http.StatusTooManyRequests {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status after %d refused handshakes = %d, want 429", authFailureLimit, blocked.Code)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestServerWithoutClientPinsAcceptsClientsAsBefore(t *testing.T) {
+	resolver := &testResolver{addresses: []netip.Addr{netip.MustParseAddr("1.1.1.1")}}
+	running := startTestServer(t, resolver, newTestDialer())
+	// A client identity is a no-op here: no certificate is requested.
+	inner, err := running.dialInnerAs(t, testClientIdentity(t, "unused.pem"))
+	if err != nil {
+		t.Fatalf("DialInnerTLS: %v", err)
+	}
+	defer func() { _ = inner.Close() }()
+	authenticate(t, inner, running.token)
+
+	// An inner TLS failure is still not metered when no pins are configured.
+	raw, err := net.DialTimeout("tcp", running.address, time.Second)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	endpoint, err := url.Parse("wss://" + running.address + TunnelPath)
+	if err != nil {
+		t.Fatalf("url.Parse: %v", err)
+	}
+	if _, err := (&tunnel.Upgrader{URL: endpoint, Timeout: time.Second}).Upgrade(t.Context(), raw); err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+	_ = raw.Close()
+	probe := httptest.NewRequest(http.MethodGet, TunnelPath, nil)
+	probe.RemoteAddr = "127.0.0.1:12345"
+	allowed := httptest.NewRecorder()
+	running.server.ServeHTTP(allowed, probe)
+	if allowed.Code == http.StatusTooManyRequests {
+		t.Fatal("an inner TLS failure was metered with no client pins configured")
+	}
+}

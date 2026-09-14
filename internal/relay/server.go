@@ -210,15 +210,31 @@ func (s *Server) sessionContext() (context.Context, context.CancelFunc) {
 }
 
 func (s *Server) handleSession(ctx context.Context, websocket net.Conn, source string) {
-	inner, _, err := tunnel.AcceptInnerTLS(ctx, websocket, s.identity, s.config.Timeouts.TLSHandshake)
+	inner, innerInfo, err := tunnel.AcceptInnerTLS(
+		ctx, websocket, s.identity, s.config.ClientPins, s.config.Timeouts.TLSHandshake)
 	if err != nil {
-		s.logger.Debug("inner TLS rejected", logging.KeyReason, "inner-tls")
+		reason := "inner-tls"
+		if errors.Is(err, tunnel.ErrClientPinMismatch) {
+			reason = "client-pin"
+		}
+		if s.config.ClientPins.Len() > 0 {
+			// Any failure here is an unauthenticated peer, and crypto/tls
+			// reports a missing certificate as an untyped error, so meter the
+			// whole set. The limiter is per source and resets on the next good
+			// HELLO, so a transient failure costs a legitimate client nothing.
+			s.authenticationFailed(source, reason)
+			return
+		}
+		s.logger.Debug("inner TLS rejected", logging.KeyReason, reason)
 		return
 	}
 	defer func() {
 		_ = inner.SetWriteDeadline(time.Now().Add(time.Second))
 		_ = inner.Close()
 	}()
+	if !innerInfo.ClientPin.IsZero() {
+		s.logger.Debug("client identity accepted", "client_pin", innerInfo.ClientPin.String())
+	}
 	if err := inner.SetDeadline(time.Now().Add(s.config.Timeouts.Control)); err != nil {
 		return
 	}

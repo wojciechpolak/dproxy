@@ -7,6 +7,18 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Optional mTLS (mutual TLS) on the inner TLS session, as pinned client
+  certificates rather than a client CA. A remote configured with `client_pins`
+  requires a client certificate whose SPKI digest is in that set, verified
+  during the handshake before `HELLO` is read and metered by the authentication
+  rate limiter. Clients set `client_identity_file`; the identity is created on
+  first use with owner-only permissions and its `client_pin` is printed at
+  startup. The shared token remains mandatory in every mode, the `dproxy/1`
+  protocol is unchanged, and a remote without `client_pins` behaves exactly as
+  before.
+
 ## [1.1.0] - 2026-09-12
 
 ### Added

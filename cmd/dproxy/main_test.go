@@ -389,3 +389,96 @@ token_file = "/run/secrets/dproxy-token"
 		t.Errorf("exit code = %d, want %d; stderr: %s", code, exitFailure, out.stderr.String())
 	}
 }
+
+func TestClientStartupLogsItsClientPin(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "token")
+	token := "0123456789abcdef0123456789abcdef"
+	writePrivateTestFile(t, tokenPath, token)
+	identityPath := filepath.Join(t.TempDir(), "client-identity.pem")
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("find free address: %v", err)
+	}
+	address := probe.Addr().String()
+	if err := probe.Close(); err != nil {
+		t.Fatalf("close probe listener: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var stderr strings.Builder
+	code := runClientContext(ctx, []string{
+		"--listen", address,
+		"--server", "wss://dproxy.example.com/v1/tunnel",
+		"--server-pin", "sha256:" + strings.Repeat("ab", 32),
+		"--token-file", tokenPath,
+		"--client-identity-file", identityPath,
+	}, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr: %s", code, exitOK, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "client_pin=\"sha256:") {
+		t.Errorf("startup log omitted the client pin: %s", stderr.String())
+	}
+	if strings.Contains(stderr.String(), token) {
+		t.Errorf("startup log leaked token: %s", stderr.String())
+	}
+	if _, err := os.Stat(identityPath); err != nil {
+		t.Errorf("client identity was not created: %v", err)
+	}
+}
+
+func TestClientStartupOmitsTheClientPinWhenUnconfigured(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "token")
+	writePrivateTestFile(t, tokenPath, "0123456789abcdef0123456789abcdef")
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("find free address: %v", err)
+	}
+	address := probe.Addr().String()
+	if err := probe.Close(); err != nil {
+		t.Fatalf("close probe listener: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var stderr strings.Builder
+	if code := runClientContext(ctx, []string{
+		"--listen", address,
+		"--server", "wss://dproxy.example.com/v1/tunnel",
+		"--server-pin", "sha256:" + strings.Repeat("ab", 32),
+		"--token-file", tokenPath,
+	}, &stderr); code != exitOK {
+		t.Fatalf("exit code = %d; stderr: %s", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "client_pin") {
+		t.Errorf("startup log mentioned a client pin that is not configured: %s", stderr.String())
+	}
+}
+
+func TestServerStartupLogsTheClientPinCount(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "token")
+	writePrivateTestFile(t, tokenPath, "0123456789abcdef0123456789abcdef")
+	identityPath := filepath.Join(t.TempDir(), "identity.pem")
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("find free address: %v", err)
+	}
+	address := probe.Addr().String()
+	if err := probe.Close(); err != nil {
+		t.Fatalf("close probe listener: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var stderr strings.Builder
+	code := runServerContext(ctx, []string{
+		"--listen", address,
+		"--token-file", tokenPath,
+		"--identity-file", identityPath,
+		"--client-pin", "sha256:" + strings.Repeat("cd", 32),
+	}, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr: %s", code, exitOK, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "client_pins=1") {
+		t.Errorf("startup log omitted the client pin count: %s", stderr.String())
+	}
+}

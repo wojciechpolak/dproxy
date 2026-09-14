@@ -112,6 +112,13 @@ client uses it to authenticate the server. Do not copy `state/identity.pem`; it
 contains the server's private key. Do not copy `secrets/cloudflare_tunnel_token`
 either. That credential belongs only to the Cloudflare connector.
 
+If the deployment requires pinned client identities, one value also goes the
+other way. Each client prints `client_pin=sha256:...` in its startup record once
+`client_identity_file` is set; the server operator collects those values for
+`client_pins`. A client pin is public in the same way the server pin is, and its
+integrity matters for the same reason. Never copy a client's identity PEM off
+the machine that generated it.
+
 The client also needs the public `wss://` relay URL. It is deployment
 configuration, not a secret. Continue with
 [Configure the local client](../README.md#configure-the-local-client) to install
@@ -122,6 +129,32 @@ long-lived WebSocket connections, so a future local client must reconnect by
 opening a new tunnel rather than assuming a connection lasts forever. See
 Cloudflare's
 [WebSocket documentation](https://developers.cloudflare.com/network/websockets/).
+
+### Require pinned client certificates: optional mTLS
+
+The remote can require a pinned client certificate in addition to the token.
+Nothing is generated server-side: each client creates its own Ed25519 identity
+on its first `dproxy client` or `dproxy test` run once `client_identity_file` is
+set, so that path must be writable on that run. In a read-only client container,
+generate the file on a writable volume beforehand.
+
+**Configure every client and collect every pin before adding the first entry to
+`client_pins`.** A client without an identity is refused as soon as the list is
+non-empty, so setting it first locks the whole fleet out at the next restart.
+
+1. Set `client_identity_file` on each client and start it.
+2. Record each `client_pin=sha256:...` from the client startup records.
+3. Add all of them to the server's `client_pins` and restart the server. The
+   startup record's `client_pins=N` confirms how many were loaded.
+4. Run `dproxy test` from each client. Its `client pin` line shows the offered
+   pin, and `authentication` must pass.
+
+The token stays mandatory in every mode. A remote with no `client_pins` requests
+no certificate and behaves exactly as it did before this option existed.
+
+Upgrade the binary before adding `client_pins` to a configuration file. An
+unknown key is a deliberate startup error, so an older binary refuses to start
+on a newer file.
 
 ### Stop the server
 
@@ -145,6 +178,13 @@ The client pins one remote identity. To rotate the identity without an outage,
 start a second relay with a new identity and hostname. Test its pin, move the
 clients, then remove the old relay. If the identity key was exposed, disable the
 old public route before replacing it. Never bypass pin verification.
+
+To rotate a client identity, point `client_identity_file` at a new path or
+delete the file, start the client, and record the new `client_pin`. Add it
+alongside the old entry, restart the server, move the client, then remove the
+old entry and restart again. The list holds up to 16 entries, so clients rotate
+independently. To revoke one client, remove its pin and restart the server; the
+shared token needs rotating only if it was also exposed.
 
 To rotate the Cloudflare Tunnel credential, revoke it in Cloudflare, write the
 replacement to `secrets/cloudflare_tunnel_token`, and restart `cloudflared`.

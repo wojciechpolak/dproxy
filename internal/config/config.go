@@ -162,6 +162,10 @@ type ClientConfig struct {
 	ServerPin Pin
 	// TokenFile holds the shared secret sent inside the inner session.
 	TokenFile TokenFile
+	// ClientIdentityFile is an optional persistent Ed25519 identity presented
+	// inside inner TLS when the remote requests one. Empty presents nothing,
+	// and a configured identity is never sent to a remote that wants none.
+	ClientIdentityFile string
 	// DoHURL is the in-process resolver. There is no OS-DNS fallback.
 	DoHURL *url.URL
 	// DoHBootstrap are the addresses the resolver itself is dialed at.
@@ -232,6 +236,10 @@ type ServerConfig struct {
 	IdentityFile string
 	// TokenFile holds the shared secret the client must prove it has.
 	TokenFile TokenFile
+	// ClientPins are the client identities permitted in addition to the token.
+	// Empty requests no client certificate, which is the default. This never
+	// replaces the token: both checks apply when it is set.
+	ClientPins PinSet
 	// DoHURL resolves destinations, keeping target names out of the host's
 	// ordinary resolver.
 	DoHURL *url.URL
@@ -268,6 +276,9 @@ func (c *ServerConfig) Validate() error {
 	}
 	if c.IdentityFile == "" {
 		return errors.New("inner TLS identity file is required (--identity-file)")
+	}
+	if c.ClientPins.Len() > MaxClientPins {
+		return fmt.Errorf("client pin set has %d entries, want at most %d", c.ClientPins.Len(), MaxClientPins)
 	}
 	if err := validateDoHURL(c.DoHURL); err != nil {
 		return fmt.Errorf("DoH URL: %w", err)

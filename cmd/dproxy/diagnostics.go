@@ -165,10 +165,11 @@ var dialChecks = []string{checkTLS, checkCipher, checkECH, checkOuterSNI, checkC
 const (
 	checkInnerTLS       = "inner TLS"
 	checkServerPin      = "server pin"
+	checkClientPin      = "client pin"
 	checkAuthentication = "authentication"
 )
 
-var innerChecks = []string{checkInnerTLS, checkServerPin, checkAuthentication}
+var innerChecks = []string{checkInnerTLS, checkServerPin, checkClientPin, checkAuthentication}
 
 const checkRemoteRelay = "remote relay"
 
@@ -263,22 +264,43 @@ func diagnose(ctx context.Context, settings *config.ClientConfig) *report {
 // diagnoseInner verifies every remote-controlled stage without sending OPEN.
 // Keeping it separate also lets tests exercise the real pinned TLS and HELLO
 // exchange without needing a public ECH endpoint.
+//
+// The client pin line reports the identity this client offered. A refusal is
+// reported on the authentication line instead: TLS 1.3 validates the client
+// certificate after the client handshake completes, so that is where the
+// refusal arrives, and report lines are appended once in a fixed order.
 func diagnoseInner(ctx context.Context, stream net.Conn, settings *config.ClientConfig, result *report) {
-	inner, innerInfo, err := tunnel.DialInnerTLS(ctx, stream, settings.ServerPin, settings.Timeouts.TLSHandshake)
+	var identity *tunnel.Identity
+	if settings.ClientIdentityFile != "" {
+		loaded, err := tunnel.LoadOrCreateClientIdentity(settings.ClientIdentityFile)
+		if err != nil {
+			result.skip(checkInnerTLS, checkServerPin)
+			result.fail(checkClientPin, safeIdentityFileError(err))
+			result.skip(checkAuthentication, checkRemoteRelay)
+			return
+		}
+		identity = loaded
+	}
+	inner, innerInfo, err := tunnel.DialInnerTLS(ctx, stream, settings.ServerPin, identity, settings.Timeouts.TLSHandshake)
 	if err != nil {
 		if errors.Is(err, tunnel.ErrPinMismatch) {
 			result.skip(checkInnerTLS)
 			result.fail(checkServerPin, err)
-			result.skip(checkAuthentication, checkRemoteRelay)
+			result.skip(checkClientPin, checkAuthentication, checkRemoteRelay)
 		} else {
 			result.fail(checkInnerTLS, err)
-			result.skip(checkServerPin, checkAuthentication, checkRemoteRelay)
+			result.skip(checkServerPin, checkClientPin, checkAuthentication, checkRemoteRelay)
 		}
 		return
 	}
 	defer func() { _ = inner.Close() }()
 	result.ok(checkInnerTLS, tls.VersionName(innerInfo.Version)+" / "+innerInfo.NegotiatedProtocol)
 	result.ok(checkServerPin, "verified")
+	if innerInfo.ClientPin.IsZero() {
+		result.ok(checkClientPin, "not configured")
+	} else {
+		result.ok(checkClientPin, innerInfo.ClientPin.String())
+	}
 
 	token, err := settings.TokenFile.Read()
 	if err != nil {
@@ -287,7 +309,12 @@ func diagnoseInner(ctx context.Context, stream net.Conn, settings *config.Client
 		return
 	}
 	if err := authenticateDiagnostic(ctx, inner, token, settings.Timeouts.Control); err != nil {
-		result.fail(checkAuthentication, err)
+		if tunnel.ClientCertificateRejected(err) {
+			result.fail(checkAuthentication, errors.New(
+				"the remote refused this client identity; add the client pin above to its client_pins"))
+		} else {
+			result.fail(checkAuthentication, err)
+		}
 		result.skip(checkRemoteRelay)
 		return
 	}
@@ -312,12 +339,18 @@ func authenticateDiagnostic(ctx context.Context, conn *tls.Conn, token config.To
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
+		if tunnel.ClientCertificateRejected(err) {
+			return tunnel.ErrClientCertificateRejected
+		}
 		return errors.New("the remote did not receive HELLO")
 	}
 	message, err := decoder.Decode()
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
+		}
+		if tunnel.ClientCertificateRejected(err) {
+			return tunnel.ErrClientCertificateRejected
 		}
 		return tunnel.ErrAuthenticationFailed
 	}
@@ -347,6 +380,22 @@ func safeTokenFileError(err error) error {
 		return errors.New("token file is too large")
 	default:
 		return errors.New("token file could not be read")
+	}
+}
+
+// safeIdentityFileError keeps the client identity path out of a normal report,
+// matching how safeTokenFileError treats the token file.
+func safeIdentityFileError(err error) error {
+	text := err.Error()
+	switch {
+	case strings.Contains(text, "permissions"):
+		return errors.New("client identity file permissions are too open; restrict access to the current user")
+	case strings.Contains(text, " is a directory"):
+		return errors.New("client identity file path names a directory")
+	case strings.Contains(text, "larger"):
+		return errors.New("client identity file is too large")
+	default:
+		return errors.New("client identity file could not be read or created")
 	}
 }
 

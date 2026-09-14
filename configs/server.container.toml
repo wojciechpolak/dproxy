@@ -4,6 +4,11 @@ listen = "0.0.0.0:8686"
 identity_file = "/var/lib/dproxy/identity.pem"
 token_file = "/run/secrets/dproxy_token"
 
+# Optional pinned client identities, required in addition to the token. Empty
+# behaves exactly as before. See configs/server.example.toml for the rollout
+# order: every client needs an identity before the first entry is added here.
+# client_pins = ["sha256:REPLACE_WITH_A_CLIENT_SPKI_DIGEST"]
+
 doh_url = "https://cloudflare-dns.com/dns-query"
 
 [timeouts]

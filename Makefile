@@ -148,14 +148,19 @@ tidy-check: ## Fail if either module's go.mod or go.sum would change
 
 .PHONY: e2e-local
 e2e-local: ## Run the in-process end-to-end topology
-	$(GO) test -race -tags e2e ./...
+	$(GO) test -race -tags e2e $$($(GO) list ./... | grep -v '/internal/integration$$$$')
+	$(GO) test -race -tags e2e -v ./internal/integration
 
 .PHONY: e2e-docker
 e2e-docker: ## Run the end-to-end suite against the production remote image
 	./scripts/docker-e2e.sh
 
+.PHONY: e2e-docker-mtls
+e2e-docker-mtls: ## Run the Docker suite with the remote requiring pinned client certificates
+	DPROXY_E2E_CLIENT_PINS=1 ./scripts/docker-e2e.sh
+
 .PHONY: e2e
-e2e: e2e-local e2e-docker ## Run every deterministic end-to-end test
+e2e: e2e-local e2e-docker e2e-docker-mtls ## Run every deterministic end-to-end test
 
 .PHONY: e2e-cloudflare
 e2e-cloudflare: ## Run the real Cloudflare relay and packet-capture privacy test

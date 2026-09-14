@@ -43,6 +43,7 @@ type Server struct {
 	logger     *logging.Logger
 	checker    policy.Checker
 	opener     TunnelOpener
+	clientPin  config.Pin
 	http       *http.Server
 	draining   atomic.Bool
 	serveMu    sync.Mutex
@@ -68,12 +69,14 @@ func NewServer(options ServerOptions) (*Server, error) {
 		return nil, err
 	}
 	opener := options.Opener
+	clientPin := config.Pin{}
 	if opener == nil {
 		client, err := tunnel.NewClient(tunnel.ClientOptions{Config: &settings})
 		if err != nil {
 			return nil, err
 		}
 		opener = client
+		clientPin = client.IdentityPin()
 	}
 	logger := options.Logger
 	if logger == nil {
@@ -84,6 +87,7 @@ func NewServer(options ServerOptions) (*Server, error) {
 		logger:     logger,
 		checker:    settings.Checker(),
 		opener:     opener,
+		clientPin:  clientPin,
 		active:     make(map[*activeSession]struct{}),
 		activeZero: closedChannel(),
 	}
@@ -96,6 +100,10 @@ func NewServer(options ServerOptions) (*Server, error) {
 	}
 	return server, nil
 }
+
+// ClientPin is the pinned client identity this proxy presents, zero when none
+// is configured.
+func (s *Server) ClientPin() config.Pin { return s.clientPin }
 
 // ListenAndServe binds the configured loopback listener and serves until
 // shutdown.

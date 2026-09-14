@@ -6,6 +6,7 @@ package tunnel
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/x509"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -97,5 +98,58 @@ func TestIdentityFileBoundaryErrors(t *testing.T) {
 	}
 	if _, err := LoadOrCreateIdentity(malformed); err == nil {
 		t.Fatal("LoadOrCreateIdentity replaced a malformed identity")
+	}
+}
+
+func TestLoadOrCreateIdentityKeepsServerExtendedKeyUsage(t *testing.T) {
+	// Existing deployments hold identity files written by earlier versions.
+	// Nothing about the server template may drift.
+	identity, err := LoadOrCreateIdentity(filepath.Join(t.TempDir(), "identity.pem"))
+	if err != nil {
+		t.Fatalf("LoadOrCreateIdentity: %v", err)
+	}
+	leaf := identity.Certificate.Leaf
+	if got := leaf.Subject.CommonName; got != "dproxy inner TLS" {
+		t.Errorf("common name = %q, want %q", got, "dproxy inner TLS")
+	}
+	if len(leaf.ExtKeyUsage) != 1 || leaf.ExtKeyUsage[0] != x509.ExtKeyUsageServerAuth {
+		t.Errorf("extended key usage = %v, want [ServerAuth]", leaf.ExtKeyUsage)
+	}
+	if leaf.KeyUsage != x509.KeyUsageDigitalSignature {
+		t.Errorf("key usage = %v, want DigitalSignature", leaf.KeyUsage)
+	}
+	if _, ok := leaf.PublicKey.(ed25519.PublicKey); !ok {
+		t.Errorf("public key = %T, want Ed25519", leaf.PublicKey)
+	}
+}
+
+func TestLoadOrCreateClientIdentityUsesClientExtendedKeyUsage(t *testing.T) {
+	identity, err := LoadOrCreateClientIdentity(filepath.Join(t.TempDir(), "client-identity.pem"))
+	if err != nil {
+		t.Fatalf("LoadOrCreateClientIdentity: %v", err)
+	}
+	leaf := identity.Certificate.Leaf
+	if len(leaf.ExtKeyUsage) != 1 || leaf.ExtKeyUsage[0] != x509.ExtKeyUsageClientAuth {
+		t.Errorf("extended key usage = %v, want [ClientAuth]", leaf.ExtKeyUsage)
+	}
+	if _, ok := leaf.PublicKey.(ed25519.PublicKey); !ok {
+		t.Errorf("public key = %T, want Ed25519", leaf.PublicKey)
+	}
+}
+
+func TestLoadIdentityAcceptsEitherRole(t *testing.T) {
+	// A server identity written before client pins existed must still load and
+	// be usable as a client identity: LoadIdentity must not check the usage.
+	path := filepath.Join(t.TempDir(), "identity.pem")
+	created, err := LoadOrCreateIdentity(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreateIdentity: %v", err)
+	}
+	reused, err := LoadOrCreateClientIdentity(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreateClientIdentity on a server identity: %v", err)
+	}
+	if reused.Pin != created.Pin {
+		t.Errorf("pin changed on reload: %s want %s", reused.Pin, created.Pin)
 	}
 }

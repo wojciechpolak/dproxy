@@ -73,14 +73,20 @@ func runClientContext(ctx context.Context, args []string, stderr io.Writer) exit
 		return exitFailure
 	}
 	defer func() { _ = listener.Close() }()
-	logger.Info("client configuration loaded",
+	attributes := []any{
 		"listen", settings.Listen,
 		"ech", settings.ECH.String(),
 		"allow_all_destinations", settings.Allowlist.AllowsAll(),
 		"allowlist_patterns", settings.Allowlist.Len(),
 		"token_file", settings.TokenFile.String(),
 		logging.KeyRelay, settings.RelayURL.Hostname(),
-	)
+	}
+	if pin := server.ClientPin(); !pin.IsZero() {
+		attributes = append(attributes,
+			"client_identity_file", settings.ClientIdentityFile,
+			"client_pin", pin.String())
+	}
+	logger.Info("client configuration loaded", attributes...)
 	serveErrors := make(chan error, 1)
 	go func() { serveErrors <- server.Serve(listener) }()
 	select {
@@ -144,6 +150,7 @@ func runServerContext(ctx context.Context, args []string, stderr io.Writer) exit
 		"token_file", settings.TokenFile.String(),
 		"identity_file", settings.IdentityFile,
 		"identity_pin", server.IdentityPin().String(),
+		"client_pins", settings.ClientPins.Len(),
 	)
 	serveErrors := make(chan error, 1)
 	go func() { serveErrors <- server.Serve(listener) }()
