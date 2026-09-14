@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"path/filepath"
@@ -357,6 +358,45 @@ func TestInnerTLSIgnoresAClientIdentityWhenNoPinsAreConfigured(t *testing.T) {
 	_ = client.Close()
 }
 
+// TestConnectionResetMatchesARealSocketReset checks connectionResetErrors
+// against an error the operating system produced. A remote that refuses the
+// certificate closes with the client's HELLO still unread, and Windows reports
+// that as a reset rather than delivering the alert. Windows names that error
+// WSAECONNRESET, which its own syscall.ECONNRESET never matches, so compiling
+// the constant is no evidence that it matches.
+func TestConnectionResetMatchesARealSocketReset(t *testing.T) {
+	clientRaw, serverRaw := loopbackPair(t)
+	tcp, ok := serverRaw.(*net.TCPConn)
+	if !ok {
+		t.Fatalf("loopbackPair server = %T, want *net.TCPConn", serverRaw)
+	}
+	// SO_LINGER 0 makes the close send RST instead of FIN.
+	if err := tcp.SetLinger(0); err != nil {
+		t.Fatalf("SetLinger: %v", err)
+	}
+	if err := tcp.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	var err error
+	for range 10 {
+		if _, err = clientRaw.Read(make([]byte, 1)); err != nil {
+			break
+		}
+	}
+	if err == nil {
+		t.Fatal("read succeeded after the peer reset the connection")
+	}
+	if errors.Is(err, io.EOF) {
+		t.Fatalf("read = %v, want a reset; the peer closed in an orderly way", err)
+	}
+	if !connectionReset(err) {
+		t.Fatalf("connectionReset(%v) = false, want true", err)
+	}
+	if !ClientCertificateRejected(err) {
+		t.Errorf("ClientCertificateRejected(%v) = false, want true", err)
+	}
+}
+
 func TestClientCertificateRejectedIgnoresUnrelatedErrors(t *testing.T) {
 	if ClientCertificateRejected(nil) {
 		t.Error("nil classified as a certificate refusal")
@@ -366,5 +406,9 @@ func TestClientCertificateRejectedIgnoresUnrelatedErrors(t *testing.T) {
 	}
 	if !ClientCertificateRejected(ErrClientPinMismatch) {
 		t.Error("ErrClientPinMismatch not classified as a certificate refusal")
+	}
+	reset := fmt.Errorf("receive HELLO response: %w", &net.OpError{Op: "read", Err: connectionResetErrors[0]})
+	if !ClientCertificateRejected(reset) {
+		t.Error("a wrapped connection reset not classified as a certificate refusal")
 	}
 }

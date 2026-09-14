@@ -177,12 +177,32 @@ func ClientCertificateRejected(err error) bool {
 	if errors.Is(err, ErrClientPinMismatch) || errors.Is(err, ErrClientCertificateRejected) {
 		return true
 	}
+	// A remote that refuses the certificate closes while the client's HELLO is
+	// still unread, and that close resets the connection instead of delivering
+	// the alert. Windows always reports the reset. Other systems normally
+	// deliver the buffered alert first. A refused token never arrives this way.
+	// The remote reads HELLO before it rejects one, so its close is orderly and
+	// the client reads io.EOF.
+	if connectionReset(err) {
+		return true
+	}
 	var opErr *net.OpError
 	if !errors.As(err, &opErr) || opErr.Op != "remote error" || opErr.Err == nil {
 		return false
 	}
 	for _, alert := range rejectedCertificateAlerts {
 		if opErr.Err.Error() == alert {
+			return true
+		}
+	}
+	return false
+}
+
+// connectionReset reports whether the peer reset the connection instead of
+// closing it in order.
+func connectionReset(err error) bool {
+	for _, reset := range connectionResetErrors {
+		if errors.Is(err, reset) {
 			return true
 		}
 	}
