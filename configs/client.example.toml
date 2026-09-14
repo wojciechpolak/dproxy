@@ -10,6 +10,14 @@ server_pin = "sha256:REPLACE_WITH_THE_REMOTE_SPKI_DIGEST"
 # token_file defaults under $XDG_CONFIG_HOME or ~/.config; on Windows it uses
 # %AppData%\dproxy. Restrict the file to the current user; use mode 0600 on Unix.
 # token_file = "/path/to/dproxy/token"            # at least 32 bytes
+
+# Optional: present a pinned client identity inside the inner TLS session. Only
+# needed when the remote configures client_pins. The file is created on first
+# use with mode 0600, and the client prints its client_pin at startup; send
+# that value to the remote operator. It is never transmitted unless the remote
+# asks for it, so setting it against a remote that requires none changes
+# nothing.
+# client_identity_file = "/path/to/dproxy/client-identity.pem"
 doh_url    = "https://cloudflare-dns.com/dns-query"
 
 # The addresses the resolver itself is dialed at. Resolving the resolver's own

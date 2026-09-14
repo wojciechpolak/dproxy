@@ -86,9 +86,25 @@ func initialize(directory string) error {
 	if err := writeFile(directory, "pin", []byte(identity.Pin.String()+"\n"), 0o600); err != nil {
 		return err
 	}
-	configuration := []byte(`listen = "0.0.0.0:8686"
+	clientIdentity, err := tunnel.LoadOrCreateClientIdentity(filepath.Join(directory, "client-identity.pem"))
+	if err != nil {
+		return err
+	}
+	if err := writeFile(directory, "client-pin", []byte(clientIdentity.Pin.String()+"\n"), 0o600); err != nil {
+		return err
+	}
+	// client_pins stays commented out by default so the container keeps
+	// exercising the configuration every existing deployment uses.
+	// DPROXY_E2E_CLIENT_PINS=1 requires a pinned client against the same image.
+	// The docker suite reads the same variable and presents that identity.
+	clientPins := fmt.Sprintf(`# client_pins = ["%s"]`, clientIdentity.Pin)
+	if os.Getenv("DPROXY_E2E_CLIENT_PINS") == "1" {
+		clientPins = fmt.Sprintf(`client_pins = ["%s"]`, clientIdentity.Pin)
+	}
+	configuration := fmt.Appendf(nil, `listen = "0.0.0.0:8686"
 identity_file = "/run/e2e/identity.pem"
 token_file = "/run/e2e/token"
+%s
 doh_url = "https://resolver.e2e.test:8443/dns-query"
 doh_bootstrap = ["9.9.9.2"]
 allowlist = ["origin.e2e.test"]
@@ -109,7 +125,7 @@ max_control_message_bytes = 4096
 level = "debug"
 format = "text"
 include_targets = false
-`)
+`, clientPins)
 	return writeFile(directory, "server.toml", configuration, 0o600)
 }
 

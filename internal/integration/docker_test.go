@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -28,12 +29,60 @@ import (
 )
 
 func TestDockerizedRemoteEndToEnd(t *testing.T) {
+	scenario(t, "the production remote image relays a stream from a real container")
 	topology := newDockerTopology(t)
 	origin := topology.openTLS(t)
 	payload := []byte("dockerized remote relay payload 9f0b5ff6")
 	echo := make([]byte, len(payload))
 	if err := benchmarkRoundTrip(origin, payload, echo); err != nil {
 		t.Fatalf("relay payload: %v", err)
+	}
+}
+
+func TestDockerizedRemoteStreamsWithAPinnedClientIdentity(t *testing.T) {
+	if !dockerMutualTLS() {
+		t.Skip("DPROXY_E2E_CLIENT_PINS=1 runs the container with client_pins")
+	}
+	scenario(t, "mTLS: the production remote image accepts a pinned client identity")
+	topology := newDockerTopology(t)
+	origin := topology.openTLS(t)
+	payload := []byte("dockerized pinned client payload 4c1de0a7")
+	echo := make([]byte, len(payload))
+	if err := benchmarkRoundTrip(origin, payload, echo); err != nil {
+		t.Fatalf("relay payload: %v", err)
+	}
+}
+
+func TestDockerizedRemoteRejectsAnUnpinnedClientIdentity(t *testing.T) {
+	if !dockerMutualTLS() {
+		t.Skip("DPROXY_E2E_CLIENT_PINS=1 runs the container with client_pins")
+	}
+	scenario(t, "mTLS: the production remote image refuses an identity outside client_pins")
+	clientConfig := newDockerClientConfig(t, dockerDirectory(t))
+	// A real identity the operator never pinned, rather than no identity at
+	// all. This proves the container checks the pin value, not only that a
+	// certificate arrived.
+	clientConfig.ClientIdentityFile = filepath.Join(t.TempDir(), "unpinned-identity.pem")
+	client, err := tunnel.NewClient(tunnel.ClientOptions{
+		Config:       clientConfig,
+		StreamDialer: newDockerStreamDialer(clientConfig.RelayURL),
+	})
+	if err != nil {
+		t.Fatalf("build tunnel client: %v", err)
+	}
+	destination, err := policy.NewDestination(testDockerOriginHost, 443)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, err := client.Open(ctx, destination)
+	if err == nil {
+		_ = conn.Close()
+		t.Fatal("the remote opened a tunnel for an unpinned client identity")
+	}
+	if !errors.Is(err, tunnel.ErrClientCertificateRejected) {
+		t.Fatalf("Open error = %v, want %v", err, tunnel.ErrClientCertificateRejected)
 	}
 }
 
@@ -47,16 +96,26 @@ type dockerTopology struct {
 	roots   *x509.CertPool
 }
 
-func newDockerTopology(t testing.TB) *dockerTopology {
+// dockerMutualTLS reports whether the container runs with client_pins.
+// scripts/docker-e2e.sh sets the same variable for `fixture init`, so the
+// container's server.toml and this client always use the same configuration.
+func dockerMutualTLS() bool { return os.Getenv("DPROXY_E2E_CLIENT_PINS") == "1" }
+
+// dockerDirectory returns the directory holding the generated credentials.
+func dockerDirectory(t testing.TB) string {
 	t.Helper()
 	directory := os.Getenv("DPROXY_E2E_DIR")
 	if directory == "" {
 		t.Fatal("DPROXY_E2E_DIR is required")
 	}
-	remoteAddress := os.Getenv("DPROXY_E2E_REMOTE_ADDR")
-	if remoteAddress == "" {
-		remoteAddress = "127.0.0.1:18686"
-	}
+	return directory
+}
+
+// newDockerClientConfig builds the client half of the Dockerized topology.
+// When the container requires client pins, the client presents the identity
+// the fixture generated and pinned.
+func newDockerClientConfig(t testing.TB, directory string) *config.ClientConfig {
+	t.Helper()
 	pinText, err := os.ReadFile(filepath.Join(directory, "pin"))
 	if err != nil {
 		t.Fatalf("read remote pin: %v", err)
@@ -89,9 +148,19 @@ func newDockerTopology(t testing.TB) *dockerTopology {
 		Timeouts:     timeouts,
 		Log:          config.DefaultLogOptions(),
 	}
+	if dockerMutualTLS() {
+		clientConfig.ClientIdentityFile = filepath.Join(directory, "client-identity.pem")
+	}
+	return clientConfig
+}
+
+func newDockerTopology(t testing.TB) *dockerTopology {
+	t.Helper()
+	directory := dockerDirectory(t)
+	clientConfig := newDockerClientConfig(t, directory)
 	client, err := tunnel.NewClient(tunnel.ClientOptions{
 		Config:       clientConfig,
-		StreamDialer: plainStreamDialer{address: remoteAddress, endpoint: relayURL},
+		StreamDialer: newDockerStreamDialer(clientConfig.RelayURL),
 	})
 	if err != nil {
 		t.Fatalf("build tunnel client: %v", err)
@@ -204,6 +273,16 @@ func listenDockerLoopback(t testing.TB) net.Listener {
 type plainStreamDialer struct {
 	address  string
 	endpoint *url.URL
+}
+
+// newDockerStreamDialer dials the port the compose file publishes for the
+// remote container, in place of the public front end.
+func newDockerStreamDialer(endpoint *url.URL) plainStreamDialer {
+	address := os.Getenv("DPROXY_E2E_REMOTE_ADDR")
+	if address == "" {
+		address = "127.0.0.1:18686"
+	}
+	return plainStreamDialer{address: address, endpoint: endpoint}
 }
 
 func (d plainStreamDialer) DialStream(ctx context.Context) (net.Conn, error) {

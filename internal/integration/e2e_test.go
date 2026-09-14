@@ -49,6 +49,7 @@ const (
 )
 
 func TestEndToEndStreams(t *testing.T) {
+	scenario(t, "streams survive the full chain byte for byte, including half-close")
 	t.Run("arbitrary bytes", func(t *testing.T) {
 		topology := newTopology(t, topologyOptions{})
 		conn, _ := topology.openTLS(t)
@@ -97,6 +98,7 @@ func TestEndToEndStreams(t *testing.T) {
 }
 
 func TestProviderStyleLongRunningHTTPStream(t *testing.T) {
+	scenario(t, "a chunked server-sent-event stream stays open past the remote idle timeout")
 	chunks := []string{
 		"data: first\n\n",
 		"data: second\n\n",
@@ -156,6 +158,7 @@ func TestProviderStyleLongRunningHTTPStream(t *testing.T) {
 }
 
 func TestProviderStyleApplicationWebSocket(t *testing.T) {
+	scenario(t, "an application WebSocket runs inside the tunnel's own WebSocket")
 	originResult := make(chan error, 1)
 	topology := newTopology(t, topologyOptions{originHandler: func(conn *tls.Conn) {
 		reader := bufio.NewReader(conn)
@@ -218,6 +221,7 @@ func TestProviderStyleApplicationWebSocket(t *testing.T) {
 }
 
 func TestEndToEndDisconnectsAndTimeouts(t *testing.T) {
+	scenario(t, "disconnects, cancellation, lifetime caps and backpressure tear down cleanly")
 	t.Run("abrupt client disconnect", func(t *testing.T) {
 		originClosed := make(chan struct{})
 		topology := newTopology(t, topologyOptions{originHandler: func(conn *tls.Conn) {
@@ -299,6 +303,7 @@ func TestEndToEndDisconnectsAndTimeouts(t *testing.T) {
 }
 
 func TestEndToEndPolicyRefusalsNeverDialOrigin(t *testing.T) {
+	scenario(t, "a refused destination never reaches the resolver or the dialer")
 	topology := newTopology(t, topologyOptions{resolvedAddresses: []netip.Addr{netip.MustParseAddr("127.0.0.1")}})
 	cases := []struct {
 		name      string
@@ -327,6 +332,7 @@ func TestEndToEndPolicyRefusalsNeverDialOrigin(t *testing.T) {
 }
 
 func TestFrontEndVisiblePayloadIsInnerTLSCiphertext(t *testing.T) {
+	scenario(t, "privacy: the front end sees no hostname, token or payload in plaintext")
 	topology := newTopology(t, topologyOptions{recordWSS: true})
 	conn, _ := topology.openTLS(t)
 	payload := []byte("application payload marker 8d58640842f4")
@@ -344,6 +350,7 @@ func TestFrontEndVisiblePayloadIsInnerTLSCiphertext(t *testing.T) {
 }
 
 func TestHTTPSProxyCompatibility(t *testing.T) {
+	scenario(t, "curl and git work through the local HTTPS proxy unmodified")
 	t.Run("curl", func(t *testing.T) {
 		requests := make(chan *http.Request, 1)
 		topology := newTopology(t, topologyOptions{originHandler: compatibilityHTTPHandler(requests, http.StatusNoContent, nil)})
@@ -393,6 +400,7 @@ func TestHTTPSProxyCompatibility(t *testing.T) {
 // fake credentials plus a local API endpoint, but the binaries are too large to
 // install as product or CI dependencies. `make provider-compat` opts in.
 func TestProviderCLICompatibility(t *testing.T) {
+	scenario(t, "Codex CLI and Claude Code reach a fixture origin through the tunnel")
 	if os.Getenv("DPROXY_PROVIDER_COMPAT") != "1" {
 		t.Skip("set DPROXY_PROVIDER_COMPAT=1 or run make provider-compat")
 	}
@@ -433,6 +441,10 @@ type topologyOptions struct {
 	remoteMaxLifetime time.Duration
 	resolvedAddresses []netip.Addr
 	recordWSS         bool
+	// pinClientIdentity makes the remote require a pinned client certificate
+	// in addition to the token. withoutClientIdentity then withholds it.
+	pinClientIdentity     bool
+	withoutClientIdentity bool
 }
 
 type testTopology struct {
@@ -443,6 +455,8 @@ type testTopology struct {
 	dialer  *recordingDialer
 	stream  *fixtureStreamDialer
 	token   config.Token
+	// clientIdentity is nil unless the topology pins client identities.
+	clientIdentity *tunnel.Identity
 }
 
 func newTopology(t testing.TB, options topologyOptions) *testTopology {
@@ -483,11 +497,29 @@ func newTopology(t testing.TB, options topologyOptions) *testTopology {
 	if err != nil {
 		t.Fatalf("create remote identity: %v", err)
 	}
+	var clientIdentity *tunnel.Identity
+	var clientPins config.PinSet
+	clientIdentityFile := ""
+	if options.pinClientIdentity {
+		clientIdentityFile = t.TempDir() + "/client-identity.pem"
+		clientIdentity, err = tunnel.LoadOrCreateClientIdentity(clientIdentityFile)
+		if err != nil {
+			t.Fatalf("create client identity: %v", err)
+		}
+		clientPins, err = config.NewPinSet(clientIdentity.Pin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if options.withoutClientIdentity {
+			clientIdentity = nil
+		}
+	}
 	dohURL := mustURL(t, "https://resolver.e2e.test/dns-query")
 	remoteConfig := &config.ServerConfig{
 		Listen:       "127.0.0.1:1",
 		IdentityFile: "unused",
 		TokenFile:    "unused",
+		ClientPins:   clientPins,
 		DoHURL:       dohURL,
 		DoHBootstrap: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
 		Allowlist:    allowlist,
@@ -527,7 +559,9 @@ func newTopology(t testing.TB, options topologyOptions) *testTopology {
 		Timeouts:     timeouts,
 		Log:          config.DefaultLogOptions(),
 	}
-	client, err := tunnel.NewClient(tunnel.ClientOptions{Config: clientConfig, Token: token, StreamDialer: stream})
+	client, err := tunnel.NewClient(tunnel.ClientOptions{
+		Config: clientConfig, Token: token, Identity: clientIdentity, StreamDialer: stream,
+	})
 	if err != nil {
 		t.Fatalf("build tunnel client: %v", err)
 	}
@@ -542,6 +576,7 @@ func newTopology(t testing.TB, options topologyOptions) *testTopology {
 	topology := &testTopology{
 		local: local, localAt: localListener.Addr().String(), remote: remote,
 		origin: origin, dialer: dialer, stream: stream, token: token,
+		clientIdentity: clientIdentity,
 	}
 	t.Cleanup(func() {
 		shutdownServer(t, local.Shutdown, serveLocal, "local proxy")
@@ -1071,3 +1106,50 @@ var (
 	_ policy.Resolver     = staticResolver{}
 	_ tunnel.StreamDialer = (*fixtureStreamDialer)(nil)
 )
+
+func TestEndToEndStreamsWithAPinnedClientIdentity(t *testing.T) {
+	scenario(t, "mTLS: a client whose pin the remote accepts streams end to end")
+	topology := newTopology(t, topologyOptions{pinClientIdentity: true})
+	if topology.clientIdentity == nil {
+		t.Fatal("topology did not build a client identity")
+	}
+	conn, _ := topology.openTLS(t)
+	payload := []byte("pinned client payload")
+	writeAndReadEcho(t, conn, payload, len(payload))
+}
+
+func TestEndToEndRejectsAnUnpinnedClientIdentity(t *testing.T) {
+	scenario(t, "mTLS: a client with no identity is refused before the origin is dialed")
+	topology := newTopology(t, topologyOptions{pinClientIdentity: true, withoutClientIdentity: true})
+	response, conn := topology.connect(t, testOriginHost+":443")
+	_ = conn.Close()
+	if response.StatusCode == http.StatusOK {
+		t.Fatalf("CONNECT succeeded without a pinned client identity")
+	}
+	if got := topology.dialer.calls.Load(); got != 0 {
+		t.Fatalf("target dialer called %d times for an unpinned client", got)
+	}
+	if got := topology.origin.accepted.Load(); got != 0 {
+		t.Fatalf("origin accepted %d connections for an unpinned client", got)
+	}
+}
+
+func TestFrontEndVisiblePayloadHidesThePinnedClientCertificate(t *testing.T) {
+	scenario(t, "mTLS privacy: the client certificate and its pin never reach the front-end wire")
+	topology := newTopology(t, topologyOptions{recordWSS: true, pinClientIdentity: true})
+	conn, _ := topology.openTLS(t)
+	payload := []byte("pinned application payload marker")
+	writeAndReadEcho(t, conn, payload, len(payload))
+	visible := topology.stream.recorded()
+	for _, secret := range [][]byte{
+		[]byte(testOriginHost),
+		topology.token.Bytes(),
+		payload,
+		topology.clientIdentity.Certificate.Certificate[0],
+		topology.clientIdentity.Pin.Digest(),
+	} {
+		if bytes.Contains(visible, secret) {
+			t.Fatalf("front-end-visible WSS bytes contain plaintext %q", secret)
+		}
+	}
+}

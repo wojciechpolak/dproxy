@@ -6,6 +6,15 @@
 listen        = "127.0.0.1:8686"             # reached through private ingress
 token_file    = "/run/secrets/dproxy-token"  # mode 0600, at least 32 bytes
 identity_file = "/var/lib/dproxy/identity.pem" # generated once with mode 0600
+
+# Optional: require a pinned client certificate in addition to the token. With
+# no entries the remote requests no certificate and behaves exactly as before.
+# Each entry is the digest a client prints as client_pin when it starts; at
+# most 16, so clients rotate and are revoked independently.
+#
+# Set client_identity_file on every client and collect every pin BEFORE adding
+# an entry here, or the next restart locks the whole fleet out.
+# client_pins = ["sha256:REPLACE_WITH_A_CLIENT_SPKI_DIGEST"]
 doh_url       = "https://cloudflare-dns.com/dns-query"
 
 # Addresses for the resolver itself; required for any endpoint other than the

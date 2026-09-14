@@ -71,7 +71,10 @@ dproxy fails closed. It does not retry with weaker transport settings.
   DNS fallback.
 - The outer connection requires TLS 1.3, a valid public certificate, an HTTPS
   DNS record with ECH configuration, and an accepted ECH handshake.
-- The inner connection requires TLS 1.3 and a matching remote identity pin.
+- The inner connection requires TLS 1.3 and a matching remote identity pin. The
+  remote can also require a pinned client certificate, making the inner session
+  mutual TLS (mTLS). The certificate is required alongside the shared token,
+  never instead of it.
 - By default, any hostname on port 443 is eligible. Operators can configure
   independent local and remote allowlists to narrow that policy.
 - Only hostname destinations on port 443 are accepted. IP literals and resolved
@@ -174,6 +177,10 @@ latest stable release with:
 docker pull ghcr.io/wojciechpolak/dproxy:latest
 ```
 
+The relay authenticates clients with a shared token. It can additionally require
+a pinned client certificate: see
+[Require pinned client certificates](docs/deployment.md#require-pinned-client-certificates-optional).
+
 Stable releases also publish `X.Y.Z` and `X.Y` tags. Use a full `X.Y.Z` tag when
 you need deliberate upgrades. To use the published image with the included
 Compose deployment, remove the `build` block from the `dproxy` service and set:
@@ -215,6 +222,12 @@ confidential because it is a bearer credential. The identity pin is safe to
 disclose, but the client must receive the correct value so it can detect an
 impostor. Never copy `state/identity.pem` to a client. It contains the server's
 private key. The Cloudflare Tunnel token is also server-side only.
+
+If the relay requires pinned client certificates, one value goes back to the
+relay operator. Set `client_identity_file` in the client configuration, start
+the client, and send the `client_pin=sha256:...` value from its startup record
+to the relay operator for `client_pins`. The identity file is created on first
+use with owner-only permissions and must never leave the client.
 
 The client token file must contain the exact same bytes as
 `secrets/dproxy_token`. On macOS and Linux, store it under the XDG configuration

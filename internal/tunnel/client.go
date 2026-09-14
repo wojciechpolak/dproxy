@@ -24,6 +24,11 @@ import (
 // for credentials because this token belongs only to dproxy.
 var ErrAuthenticationFailed = errors.New("remote dproxy authentication failed")
 
+// ErrClientCertificateRejected reports that the remote refused this client's
+// pinned identity. TLS 1.3 delivers that refusal after the client's own
+// handshake completes, so it surfaces on the first control message.
+var ErrClientCertificateRejected = errors.New("remote dproxy rejected the client identity")
+
 // RemoteOpenError reports a typed OPEN_ERROR from the remote. The code is safe
 // to log and maps to an HTTP proxy response without using peer-supplied prose.
 type RemoteOpenError struct {
@@ -42,18 +47,21 @@ type StreamDialer interface {
 }
 
 // ClientOptions supplies validated client configuration and optional test
-// seams. Production leaves Token and StreamDialer at their zero values.
+// seams. Production leaves Token, Identity, and StreamDialer at their zero
+// values.
 type ClientOptions struct {
 	Config       *config.ClientConfig
 	Token        config.Token
+	Identity     *Identity
 	StreamDialer StreamDialer
 }
 
 // Client opens one authenticated inner tunnel per destination.
 type Client struct {
-	config config.ClientConfig
-	token  config.Token
-	stream StreamDialer
+	config   config.ClientConfig
+	token    config.Token
+	identity *Identity
+	stream   StreamDialer
 }
 
 // NewClient loads the client token and constructs the mandatory outer
@@ -70,6 +78,14 @@ func NewClient(options ClientOptions) (*Client, error) {
 	if token.IsZero() {
 		var err error
 		token, err = settings.TokenFile.Read()
+		if err != nil {
+			return nil, err
+		}
+	}
+	identity := options.Identity
+	if identity == nil && settings.ClientIdentityFile != "" {
+		var err error
+		identity, err = LoadOrCreateClientIdentity(settings.ClientIdentityFile)
 		if err != nil {
 			return nil, err
 		}
@@ -94,7 +110,16 @@ func NewClient(options ClientOptions) (*Client, error) {
 			timeout: settings.Timeouts.Control,
 		}
 	}
-	return &Client{config: settings, token: token, stream: stream}, nil
+	return &Client{config: settings, token: token, identity: identity, stream: stream}, nil
+}
+
+// IdentityPin is the client pin an operator adds to the remote's client_pins.
+// It is zero when no client identity is configured.
+func (c *Client) IdentityPin() config.Pin {
+	if c == nil || c.identity == nil {
+		return config.Pin{}
+	}
+	return c.identity.Pin
 }
 
 // Open establishes WSS, pinned inner TLS, HELLO, and OPEN in that order. The
@@ -110,7 +135,7 @@ func (c *Client) Open(ctx context.Context, destination policy.Destination) (net.
 	if err != nil {
 		return nil, err
 	}
-	inner, _, err := DialInnerTLS(ctx, stream, c.config.ServerPin, c.config.Timeouts.TLSHandshake)
+	inner, _, err := DialInnerTLS(ctx, stream, c.config.ServerPin, c.identity, c.config.Timeouts.TLSHandshake)
 	if err != nil {
 		_ = stream.Close()
 		return nil, err
@@ -135,12 +160,18 @@ func (c *Client) Open(ctx context.Context, destination policy.Destination) (net.
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
+		if ClientCertificateRejected(err) {
+			return nil, fmt.Errorf("%w: %w", ErrClientCertificateRejected, err)
+		}
 		return nil, fmt.Errorf("send HELLO: %w", err)
 	}
 	message, err := decoder.Decode()
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
+		}
+		if ClientCertificateRejected(err) {
+			return nil, fmt.Errorf("%w: %w", ErrClientCertificateRejected, err)
 		}
 		if err == io.EOF {
 			return nil, fmt.Errorf("%w: %w", ErrAuthenticationFailed, err)

@@ -27,6 +27,16 @@ const identityValidity = 10 * 365 * 24 * time.Hour
 
 const maxIdentityFileBytes = 64 << 10
 
+// identityRole selects the extended key usage of a generated identity. The
+// verification path on both sides checks neither EKU nor chain, so this only
+// records what a file was made for.
+type identityRole uint8
+
+const (
+	roleServer identityRole = iota
+	roleClient
+)
+
 // Identity is the remote's persistent inner-TLS identity and its operator
 // pin. It contains no hostname because the client authenticates the SPKI.
 type Identity struct {
@@ -34,10 +44,21 @@ type Identity struct {
 	Pin         config.Pin
 }
 
-// LoadOrCreateIdentity loads a PEM identity or creates an Ed25519 identity at
-// path. The parent directory is private when this function creates it. An
-// existing directory's policy remains the operator's responsibility.
+// LoadOrCreateIdentity loads a PEM identity or creates the remote's Ed25519
+// server identity at path. The parent directory is private when this function
+// creates it. An existing directory's policy remains the operator's
+// responsibility.
 func LoadOrCreateIdentity(path string) (*Identity, error) {
+	return loadOrCreateIdentity(path, roleServer)
+}
+
+// LoadOrCreateClientIdentity is the client half: the optional identity a local
+// dproxy presents when the remote configures client pins.
+func LoadOrCreateClientIdentity(path string) (*Identity, error) {
+	return loadOrCreateIdentity(path, roleClient)
+}
+
+func loadOrCreateIdentity(path string, role identityRole) (*Identity, error) {
 	if path == "" {
 		return nil, errors.New("inner TLS identity file is not configured")
 	}
@@ -62,7 +83,7 @@ func LoadOrCreateIdentity(path string) (*Identity, error) {
 			return nil, fmt.Errorf("protect identity directory: %w", err)
 		}
 	}
-	encoded, err := generateIdentityPEM(time.Now())
+	encoded, err := generateIdentityPEM(time.Now(), role)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +114,9 @@ func LoadOrCreateIdentity(path string) (*Identity, error) {
 }
 
 // LoadIdentity reads a PEM identity and rejects permissions that expose its
-// private key to other users.
+// private key to other users. It must never check the extended key usage:
+// that would reject identities written by earlier versions and would stop an
+// existing server identity being reused as a client identity.
 func LoadIdentity(path string) (*Identity, error) {
 	// #nosec G304 -- path is the operator's configured identity file.
 	file, err := os.Open(path)
@@ -136,7 +159,7 @@ func LoadIdentity(path string) (*Identity, error) {
 	return &Identity{Certificate: certificate, Pin: config.PinFromSPKI(leaf.RawSubjectPublicKeyInfo)}, nil
 }
 
-func generateIdentityPEM(now time.Time) ([]byte, error) {
+func generateIdentityPEM(now time.Time, role identityRole) ([]byte, error) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("generate inner TLS key: %w", err)
@@ -146,13 +169,17 @@ func generateIdentityPEM(now time.Time) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("generate inner TLS certificate serial: %w", err)
 	}
+	usage := x509.ExtKeyUsageServerAuth
+	if role == roleClient {
+		usage = x509.ExtKeyUsageClientAuth
+	}
 	template := &x509.Certificate{
 		SerialNumber:          serial,
 		Subject:               pkix.Name{CommonName: "dproxy inner TLS"},
 		NotBefore:             now.Add(-5 * time.Minute),
 		NotAfter:              now.Add(identityValidity),
 		KeyUsage:              x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		ExtKeyUsage:           []x509.ExtKeyUsage{usage},
 		BasicConstraintsValid: true,
 	}
 	certificateDER, err := x509.CreateCertificate(rand.Reader, template, template, publicKey, privateKey)

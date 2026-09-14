@@ -9,6 +9,10 @@ compose_file="$repository/test/docker/docker-compose.yml"
 export DPROXY_E2E_DIR="$e2e_directory"
 export DPROXY_E2E_UID="$(id -u)"
 export DPROXY_E2E_GID="$(id -g)"
+# DPROXY_E2E_CLIENT_PINS=1 makes the fixture write client_pins into server.toml
+# and the suite present the matching client identity. Exporting it here keeps
+# the container and the client on the same configuration.
+export DPROXY_E2E_CLIENT_PINS="${DPROXY_E2E_CLIENT_PINS:-0}"
 
 cleanup() {
 	docker compose -f "$compose_file" down --volumes --remove-orphans >/dev/null 2>&1 || true
@@ -43,4 +47,4 @@ if [ "${DPROXY_DOCKER_BENCHMARK:-}" = 1 ]; then
 	exit 0
 fi
 
-go test -race -tags docker_e2e ./internal/integration -run TestDockerizedRemoteEndToEnd -count=1
+go test -race -tags docker_e2e -v ./internal/integration -run TestDockerizedRemote -count=1

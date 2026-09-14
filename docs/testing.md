@@ -9,14 +9,15 @@ make check
 `make ci` adds the deterministic end-to-end and Docker tests used in CI. The
 main test targets are:
 
-| Command                | Purpose                                     |
-|------------------------|---------------------------------------------|
-| `make e2e-local`       | In-process client, relay, and origin tests  |
-| `make e2e-docker`      | Production remote image on an isolated net  |
-| `make e2e`             | Both deterministic suites                   |
-| `make provider-compat` | `curl`, Git, Codex CLI, and Claude Code     |
-| `make e2e-cloudflare`  | Public deployment and packet-capture checks |
-| `make benchmark`       | Fixture tunnel setup and throughput         |
+| Command                | Purpose                                         |
+|------------------------|-------------------------------------------------|
+| `make e2e-local`       | In-process client, relay, and origin tests      |
+| `make e2e-docker`      | Production remote image on an isolated net      |
+| `make e2e-docker-mtls` | Same image requiring pinned client certificates |
+| `make e2e`             | All deterministic suites, both Docker runs      |
+| `make provider-compat` | `curl`, Git, Codex CLI, and Claude Code         |
+| `make e2e-cloudflare`  | Public deployment and packet-capture checks     |
+| `make benchmark`       | Fixture tunnel setup and throughput             |
 
 GitHub Actions also runs `go test ./...` and the built CLI on a native Windows
 amd64 runner. Release builds cross-compile and package both Windows amd64 and
@@ -31,6 +32,28 @@ The Docker test runs the production remote image with fixture DoH and TLS
 services on an isolated network. It exercises the normal resolver, address
 policy, authentication, and relay code. The test removes its containers and
 generated credentials when it exits.
+
+## Pinned client certificates
+
+`make e2e-docker` runs the configuration every existing deployment uses. The
+generated `server.toml` leaves `client_pins` commented out, and the two mTLS
+tests skip. `make e2e-docker-mtls` sets `DPROXY_E2E_CLIENT_PINS=1`. The fixture
+then writes the generated client pin into `client_pins`, and the suite presents
+the matching identity. Both read the same variable, so the container and the
+client always match. `make e2e` runs both, so CI covers the option and the
+default. The second run reuses the images the first one built.
+
+The mTLS run adds two scenarios against the production image. A pinned client
+streams end to end. A client holding a real but unpinned identity gets
+`ErrClientCertificateRejected`. The second test uses an unpinned identity rather
+than no identity, so it proves the remote checks the pin value, not only that a
+certificate arrived. The container logs the refusal as
+`authentication failed reason=client-pin`, the rate-limited path. It logs
+`client_pins=N` at startup to report what it loaded.
+
+The fixture always writes `client-identity.pem` and `client-pin` into the E2E
+directory, so you can convert a default run by hand. Uncomment `client_pins` in
+the generated `server.toml` and restart the container.
 
 ## Provider compatibility
 

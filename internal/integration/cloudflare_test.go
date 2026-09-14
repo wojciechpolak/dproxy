@@ -28,6 +28,7 @@ import (
 const defaultCloudflareTarget = "example.com"
 
 func TestCloudflareIntegration(t *testing.T) {
+	scenario(t, "a real Cloudflare relay carries the tunnel with ECH accepted")
 	settings := loadCloudflareSettings(t)
 	timeouts := config.DefaultTimeouts()
 	timeouts.Dial = 10 * time.Second
@@ -145,6 +146,7 @@ type cloudflareSettings struct {
 }
 
 func TestCloudflareSettingsUseSelfContainedDefaults(t *testing.T) {
+	scenario(t, "the Cloudflare profile needs no host DNS or local configuration")
 	t.Setenv("DPROXY_CF_URL", "wss://relay.example/v1/tunnel")
 	t.Setenv("DPROXY_CF_PIN", "sha256:0000000000000000000000000000000000000000000000000000000000000000")
 	t.Setenv("DPROXY_CF_TOKEN_FILE", "/tmp/dproxy-test-token")

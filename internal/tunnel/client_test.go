@@ -83,7 +83,7 @@ func TestClientAuthenticatesOpensAndReturnsRawStream(t *testing.T) {
 	dialer := streamDialerFunc(func(context.Context) (net.Conn, error) {
 		clientSide, serverSide := net.Pipe()
 		go func() {
-			inner, _, err := AcceptInnerTLS(t.Context(), serverSide, identity, time.Second)
+			inner, _, err := AcceptInnerTLS(t.Context(), serverSide, identity, config.PinSet{}, time.Second)
 			if err != nil {
 				serverDone <- err
 				return
@@ -162,7 +162,7 @@ func TestClientClassifiesAuthenticationFailure(t *testing.T) {
 	dialer := streamDialerFunc(func(context.Context) (net.Conn, error) {
 		clientSide, serverSide := net.Pipe()
 		go func() {
-			inner, _, err := AcceptInnerTLS(t.Context(), serverSide, identity, time.Second)
+			inner, _, err := AcceptInnerTLS(t.Context(), serverSide, identity, config.PinSet{}, time.Second)
 			if err == nil {
 				_, _ = protocol.NewDecoder(inner, config.DefaultLimits().MaxControlMessageBytes).Decode()
 				_ = inner.Close()
@@ -189,7 +189,7 @@ func TestClientReturnsRemoteOpenError(t *testing.T) {
 	dialer := streamDialerFunc(func(context.Context) (net.Conn, error) {
 		clientSide, serverSide := net.Pipe()
 		go func() {
-			inner, _, err := AcceptInnerTLS(t.Context(), serverSide, identity, time.Second)
+			inner, _, err := AcceptInnerTLS(t.Context(), serverSide, identity, config.PinSet{}, time.Second)
 			if err != nil {
 				return
 			}
@@ -230,7 +230,7 @@ func TestClientDoesNotSendHelloAfterPinMismatch(t *testing.T) {
 		clientSide, serverSide := net.Pipe()
 		go func() {
 			defer func() { _ = serverSide.Close() }()
-			inner, _, err := AcceptInnerTLS(t.Context(), serverSide, serverIdentity, time.Second)
+			inner, _, err := AcceptInnerTLS(t.Context(), serverSide, serverIdentity, config.PinSet{}, time.Second)
 			if err != nil {
 				observed <- nil
 				return
@@ -315,7 +315,7 @@ func clientWithStalledControlServer(
 		clientSide, serverSide := net.Pipe()
 		go func() {
 			defer func() { _ = serverSide.Close() }()
-			inner, _, err := AcceptInnerTLS(t.Context(), serverSide, identity, time.Second)
+			inner, _, err := AcceptInnerTLS(t.Context(), serverSide, identity, config.PinSet{}, time.Second)
 			if err != nil {
 				controlRead <- err
 				serverDone <- err
@@ -455,7 +455,7 @@ func TestClientRejectsOutOfOrderControlResponses(t *testing.T) {
 			dialer := streamDialerFunc(func(context.Context) (net.Conn, error) {
 				clientSide, serverSide := net.Pipe()
 				go func() {
-					inner, _, err := AcceptInnerTLS(t.Context(), serverSide, identity, time.Second)
+					inner, _, err := AcceptInnerTLS(t.Context(), serverSide, identity, config.PinSet{}, time.Second)
 					if err == nil {
 						_, _ = protocol.NewDecoder(inner, config.DefaultLimits().MaxControlMessageBytes).Decode()
 						if test.response != nil {
@@ -478,5 +478,134 @@ func TestClientRejectsOutOfOrderControlResponses(t *testing.T) {
 				t.Fatal("Open accepted an out-of-order control response")
 			}
 		})
+	}
+}
+
+func TestClientPresentsItsPinnedIdentity(t *testing.T) {
+	identity, err := LoadOrCreateIdentity(filepath.Join(t.TempDir(), "identity.pem"))
+	if err != nil {
+		t.Fatalf("LoadOrCreateIdentity: %v", err)
+	}
+	clientIdentity, err := LoadOrCreateClientIdentity(filepath.Join(t.TempDir(), "client-identity.pem"))
+	if err != nil {
+		t.Fatalf("LoadOrCreateClientIdentity: %v", err)
+	}
+	clients, err := config.NewPinSet(clientIdentity.Pin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := testToken(t)
+	presented := make(chan config.Pin, 1)
+	dialer := streamDialerFunc(func(context.Context) (net.Conn, error) {
+		clientSide, serverSide := net.Pipe()
+		go func() {
+			inner, info, acceptErr := AcceptInnerTLS(t.Context(), serverSide, identity, clients, time.Second)
+			if acceptErr != nil {
+				presented <- config.Pin{}
+				return
+			}
+			presented <- info.ClientPin
+			encoder := protocol.NewEncoder(inner, config.DefaultLimits().MaxControlMessageBytes)
+			decoder := protocol.NewDecoder(inner, config.DefaultLimits().MaxControlMessageBytes)
+			if _, err := decoder.Decode(); err != nil {
+				return
+			}
+			_ = encoder.Encode(protocol.HelloOK{Version: protocol.Version1})
+			if _, err := decoder.Decode(); err != nil {
+				return
+			}
+			_ = encoder.Encode(protocol.OpenOK{})
+		}()
+		return clientSide, nil
+	})
+	client, err := NewClient(ClientOptions{
+		Config: testClientConfig(t, identity.Pin), Token: token,
+		Identity: clientIdentity, StreamDialer: dialer,
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if client.IdentityPin() != clientIdentity.Pin {
+		t.Errorf("IdentityPin = %s, want %s", client.IdentityPin(), clientIdentity.Pin)
+	}
+	stream, err := client.Open(t.Context(), testDestination(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+	if got := <-presented; got != clientIdentity.Pin {
+		t.Errorf("remote saw client pin %s, want %s", got, clientIdentity.Pin)
+	}
+}
+
+func TestClientWithoutIdentitySendsNoCertificate(t *testing.T) {
+	identity, err := LoadOrCreateIdentity(filepath.Join(t.TempDir(), "identity.pem"))
+	if err != nil {
+		t.Fatalf("LoadOrCreateIdentity: %v", err)
+	}
+	client, err := NewClient(ClientOptions{
+		Config: testClientConfig(t, identity.Pin), Token: testToken(t),
+		StreamDialer: streamDialerFunc(func(context.Context) (net.Conn, error) {
+			return nil, errors.New("not dialed")
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if !client.IdentityPin().IsZero() {
+		t.Errorf("IdentityPin = %s, want none", client.IdentityPin())
+	}
+}
+
+func TestClientLoadsTheConfiguredIdentityFile(t *testing.T) {
+	identity, err := LoadOrCreateIdentity(filepath.Join(t.TempDir(), "identity.pem"))
+	if err != nil {
+		t.Fatalf("LoadOrCreateIdentity: %v", err)
+	}
+	settings := testClientConfig(t, identity.Pin)
+	settings.ClientIdentityFile = filepath.Join(t.TempDir(), "client-identity.pem")
+	client, err := NewClient(ClientOptions{Config: settings, Token: testToken(t)})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if client.IdentityPin().IsZero() {
+		t.Fatal("IdentityPin is unset after loading a configured identity file")
+	}
+	reloaded, err := LoadIdentity(settings.ClientIdentityFile)
+	if err != nil {
+		t.Fatalf("LoadIdentity: %v", err)
+	}
+	if reloaded.Pin != client.IdentityPin() {
+		t.Errorf("pin = %s, want the file's %s", client.IdentityPin(), reloaded.Pin)
+	}
+}
+
+func TestClientClassifiesClientIdentityRejection(t *testing.T) {
+	identity, err := LoadOrCreateIdentity(filepath.Join(t.TempDir(), "identity.pem"))
+	if err != nil {
+		t.Fatalf("LoadOrCreateIdentity: %v", err)
+	}
+	clients, err := config.NewPinSet(testClientIdentity(t).Pin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := streamDialerFunc(func(context.Context) (net.Conn, error) {
+		clientSide, serverSide := loopbackPair(t)
+		go func() {
+			// The remote refuses the unpinned client during the handshake.
+			_, _, _ = AcceptInnerTLS(t.Context(), serverSide, identity, clients, time.Second)
+		}()
+		return clientSide, nil
+	})
+	client, err := NewClient(ClientOptions{
+		Config: testClientConfig(t, identity.Pin), Token: testToken(t),
+		Identity: testClientIdentity(t), StreamDialer: dialer,
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	_, err = client.Open(t.Context(), testDestination(t))
+	if !errors.Is(err, ErrClientCertificateRejected) {
+		t.Fatalf("Open = %v, want ErrClientCertificateRejected", err)
 	}
 }
