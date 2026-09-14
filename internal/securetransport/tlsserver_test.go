@@ -84,7 +84,12 @@ func startTerminator(t *testing.T, options terminatorOptions) *testTerminator {
 			terminator.handshakes.Add(1)
 			go func() {
 				defer func() { _ = conn.Close() }()
-				if err := conn.(*tls.Conn).HandshakeContext(t.Context()); err != nil {
+				tlsConn, ok := conn.(*tls.Conn)
+				if !ok {
+					t.Errorf("accepted %T, want *tls.Conn", conn)
+					return
+				}
+				if err := tlsConn.HandshakeContext(t.Context()); err != nil {
 					return
 				}
 				// Echo, so a test can prove the stream still works after

@@ -41,13 +41,20 @@ func TestCodecRoundTripsEveryMessage(t *testing.T) {
 		}
 		switch expected := want.(type) {
 		case Hello:
-			actual := got.(Hello)
+			actual, ok := got.(Hello)
+			if !ok {
+				t.Fatalf("Decode(%d) = %T, want Hello", index, got)
+			}
 			if actual.Version != expected.Version || !actual.Token.Equal(expected.Token) {
 				t.Error("decoded HELLO does not match")
 			}
 		case Open:
-			if got.(Open).Destination != expected.Destination {
-				t.Errorf("decoded OPEN = %s, want %s", got.(Open).Destination, expected.Destination)
+			actual, ok := got.(Open)
+			if !ok {
+				t.Fatalf("Decode(%d) = %T, want Open", index, got)
+			}
+			if actual.Destination != expected.Destination {
+				t.Errorf("decoded OPEN = %s, want %s", actual.Destination, expected.Destination)
 			}
 		default:
 			if !reflect.DeepEqual(got, want) {

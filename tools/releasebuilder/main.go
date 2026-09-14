@@ -106,7 +106,7 @@ func buildRelease(tag, output string, targets []target, epoch time.Time) error {
 	if err != nil {
 		return fmt.Errorf("create work directory: %w", err)
 	}
-	defer os.RemoveAll(work)
+	defer func() { _ = os.RemoveAll(work) }()
 
 	license, err := filepath.Abs("LICENSE")
 	if err != nil {

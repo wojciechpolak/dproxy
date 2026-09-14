@@ -131,7 +131,11 @@ func tcpPair(t *testing.T) (*net.TCPConn, *net.TCPConn) {
 		conn, _ := listener.AcceptTCP()
 		accepted <- conn
 	}()
-	client, err := net.DialTCP("tcp", nil, listener.Addr().(*net.TCPAddr))
+	addr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener address = %T, want *net.TCPAddr", listener.Addr())
+	}
+	client, err := net.DialTCP("tcp", nil, addr)
 	if err != nil {
 		t.Fatalf("DialTCP: %v", err)
 	}

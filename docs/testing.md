@@ -19,6 +19,34 @@ main test targets are:
 | `make e2e-cloudflare`  | Public deployment and packet-capture checks     |
 | `make benchmark`       | Fixture tunnel setup and throughput             |
 
+## Static analysis
+
+`make check` also runs these, each blocking in CI. All of them cover the product
+module and the `tools/` module.
+
+| Command            | Purpose                                          |
+|--------------------|--------------------------------------------------|
+| `make vet`         | `go vet`                                         |
+| `make analyze`     | The `x/tools` analyzers `go vet` does not enable |
+| `make staticcheck` | staticcheck, every check, per `staticcheck.conf` |
+| `make errcheck`    | Unchecked errors and type assertions             |
+| `make gocyclo`     | Cyclomatic complexity ceiling                    |
+| `make deadcode`    | Functions unreachable from `cmd/dproxy`          |
+
+`make analyze` builds `tools/analyze`, a `multichecker` over the
+`golang.org/x/tools` analysis passes missing from the `go vet` suite, including
+`nilness`, `lostcancel`, `unusedwrite` and `waitgroup`. It is a binary in this
+repository rather than a linter aggregator, which keeps the tool module's
+dependency graph small. Extend static analysis by adding a pass to its list, not
+by adding a tool.
+
+`make errcheck` excludes the function signatures in
+`scripts/errcheck-excludes.txt`. Those are writes to stderr and to usage
+writers, where a failed write has nowhere to go.
+
+`make gocyclo` fails above complexity 30. That is the current worst function, so
+the limit blocks new complexity rather than naming a target.
+
 GitHub Actions also runs `go test ./...` and the built CLI on a native Windows
 amd64 runner. Release builds cross-compile and package both Windows amd64 and
 arm64 binaries.
