@@ -17,7 +17,9 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,6 +86,48 @@ func TestDockerizedRemoteRejectsAnUnpinnedClientIdentity(t *testing.T) {
 	if !errors.Is(err, tunnel.ErrClientCertificateRejected) {
 		t.Fatalf("Open error = %v, want %v", err, tunnel.ErrClientCertificateRejected)
 	}
+}
+
+func TestDockerizedClientSidecar(t *testing.T) {
+	scenario(t, "the production image runs the client as a sidecar sharing the application's loopback")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if output, err := dockerCompose(ctx, "up", "--detach", "front", "dproxy-client"); err != nil {
+		t.Fatalf("start the client sidecar: %v\n%s", err, output)
+	}
+	t.Cleanup(func() {
+		if output, err := dockerCompose(context.Background(), "rm", "--stop", "--force", "front", "dproxy-client"); err != nil {
+			t.Errorf("remove the client sidecar: %v\n%s", err, output)
+		}
+	})
+	// The client binds its listener shortly after the container starts. A
+	// successful probe also shows the listener is up for the outsider check.
+	var output []byte
+	var err error
+	for range 20 {
+		if output, err = dockerCompose(ctx, "run", "--rm", "--no-deps", "probe"); err == nil {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if err != nil {
+		logs, _ := dockerCompose(ctx, "logs", "front", "dproxy-client")
+		t.Fatalf("probe through the client sidecar: %v\n%s\n%s", err, output, logs)
+	}
+	output, err = dockerCompose(ctx, "run", "--rm", "--no-deps", "outsider")
+	if err == nil {
+		t.Fatalf("a container outside the sidecar's namespace reached the client listener\n%s", output)
+	}
+	if !strings.Contains(string(output), "connection refused") {
+		t.Fatalf("outsider probe failed for an unexpected reason: %v\n%s", err, output)
+	}
+}
+
+// dockerCompose runs the sidecar profile of the compose file
+// scripts/docker-e2e.sh started, with the environment that script exported.
+func dockerCompose(ctx context.Context, arguments ...string) ([]byte, error) {
+	arguments = append([]string{"compose", "-f", "../../test/docker/docker-compose.yml", "--profile", "sidecar"}, arguments...)
+	return exec.CommandContext(ctx, "docker", arguments...).CombinedOutput()
 }
 
 const (

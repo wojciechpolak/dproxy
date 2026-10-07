@@ -15,7 +15,7 @@ export DPROXY_E2E_GID="$(id -g)"
 export DPROXY_E2E_CLIENT_PINS="${DPROXY_E2E_CLIENT_PINS:-0}"
 
 cleanup() {
-	docker compose -f "$compose_file" down --volumes --remove-orphans >/dev/null 2>&1 || true
+	docker compose -f "$compose_file" --profile sidecar down --volumes --remove-orphans >/dev/null 2>&1 || true
 	rm -rf "$e2e_directory"
 }
 trap cleanup EXIT HUP INT TERM
@@ -47,4 +47,4 @@ if [ "${DPROXY_DOCKER_BENCHMARK:-}" = 1 ]; then
 	exit 0
 fi
 
-go test -race -tags docker_e2e -v ./internal/integration -run TestDockerizedRemote -count=1
+go test -race -tags docker_e2e -v ./internal/integration -run TestDockerized -count=1

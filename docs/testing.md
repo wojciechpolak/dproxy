@@ -61,6 +61,13 @@ services on an isolated network. It exercises the normal resolver, address
 policy, authentication, and relay code. The test removes its containers and
 generated credentials when it exits.
 
+The same run checks the client sidecar described in the README. The production
+image runs `dproxy client` behind a fixture WSS front end, and a probe container
+that shares the client's network namespace streams to the origin through
+`127.0.0.1:18080`. A container on the same network outside that namespace must
+get a refused connection from the loopback-only listener. In the mTLS run the
+client container presents the pinned identity.
+
 ## Pinned client certificates
 
 `make e2e-docker` runs the configuration every existing deployment uses. The

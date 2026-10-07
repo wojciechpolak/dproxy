@@ -328,6 +328,61 @@ Run `dproxy client --help`, `dproxy server --help`, or `dproxy test --help` for
 all flags. `--config` overrides automatic discovery. Explicit flags override
 values read from the TOML file. Unknown configuration keys are startup errors.
 
+### Run the client in a dev container
+
+There is no separate client image. The published image contains the same static
+Linux binary, and `dproxy client` runs from it. The client listener is
+loopback-only, so the client must share a network namespace with the program
+that uses it. A published port cannot reach it, and binding `0.0.0.0` is a
+startup error.
+
+In a dev container, copy the binary into the dev container image. This needs
+neither Homebrew nor Go:
+
+```dockerfile
+COPY --from=ghcr.io/wojciechpolak/dproxy:X.Y.Z /dproxy /usr/local/bin/dproxy
+```
+
+Pin a full `X.Y.Z` tag or an image digest, and verify the image attestation as
+described in the [release guide](docs/release.md). Inside the dev container,
+configure the token and `client.toml` as above, run `dproxy client`, and set
+`HTTPS_PROXY=http://127.0.0.1:18080` for the tools that use it. Bind-mount the
+token from the host instead of copying it into the image or committing it under
+`.devcontainer/`. The token file must be mode 0600 and owned by the container
+user. If you use `client_identity_file`, keep it on a persistent writable mount:
+a rebuild that recreates it changes the client pin.
+
+When the dev container is a Compose project, the client can instead run as a
+sidecar from the published image. The application container joins the sidecar's
+network namespace, so both see the same `127.0.0.1:18080`:
+
+```yaml
+services:
+  dproxy-client:
+    image: ghcr.io/wojciechpolak/dproxy:X.Y.Z
+    command: ["client", "--config", "/etc/dproxy/client.toml"]
+    user: "${DPROXY_UID:-65532}:${DPROXY_GID:-65532}"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./dproxy/client.toml:/etc/dproxy/client.toml:ro
+      - ./secrets/dproxy_token:/run/secrets/dproxy_token:ro
+
+  app:
+    network_mode: "service:dproxy-client"
+    environment:
+      HTTPS_PROXY: http://127.0.0.1:18080
+```
+
+The image has no default token path, so set
+`token_file = "/run/secrets/dproxy_token"` in the mounted `client.toml`. With
+Docker-outside-of-Docker, where the dev container uses the host's Docker socket,
+`docker run --network host` joins the host's network, not the dev container's.
+Its loopback listener is then unreachable from the dev container.
+
 ## Development
 
 Run the local quality gate before submitting a change:
