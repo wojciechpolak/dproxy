@@ -140,6 +140,29 @@ func TestClientRejectsIncompleteConfiguration(t *testing.T) {
 	}
 }
 
+func TestCommandsDoNotEchoMalformedServerPins(t *testing.T) {
+	secret := "bearer-token-canary-0123456789abcdef"
+	for _, command := range []string{"client", "test"} {
+		t.Run(command, func(t *testing.T) {
+			code, out := invoke(command,
+				"--server", "wss://dproxy.example.com/v1/tunnel",
+				"--server-pin", secret,
+				"--token-file", "/run/secrets/dproxy-token",
+			)
+			if code != exitUsage {
+				t.Fatalf("exit code = %d, want %d", code, exitUsage)
+			}
+			stderr := out.stderr.String()
+			if !strings.Contains(stderr, "algorithm prefix") {
+				t.Fatalf("stderr lacks syntax guidance: %q", stderr)
+			}
+			if strings.Contains(stderr, secret) {
+				t.Fatalf("stderr echoed the malformed pin: %q", stderr)
+			}
+		})
+	}
+}
+
 func TestClientRejectsANonLoopbackListener(t *testing.T) {
 	code, out := invoke("client",
 		"--listen", "0.0.0.0:18080",

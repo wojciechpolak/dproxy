@@ -135,7 +135,10 @@ func parseSvcParams(data []byte) (map[svcParamKey][]byte, error) {
 // A list whose configurations are all versions this build cannot use is
 // invalid, not merely unsupported: in required mode the tunnel must fail here,
 // naming the reason, rather than at a handshake that reports only a rejection.
-func validateECHConfigList(list []byte) error {
+// Every supported-version public name must also differ from serverName. This is
+// deliberately conservative: crypto/tls may skip one configuration and select
+// a later one, so no supported entry may expose the relay name in outer SNI.
+func validateECHConfigList(list []byte, serverName string) error {
 	if len(list) < 6 {
 		return fmt.Errorf("%w: %d bytes is too short", errECHConfig, len(list))
 	}
@@ -153,6 +156,13 @@ func validateECHConfigList(list []byte) error {
 			return fmt.Errorf("%w: config body length is inconsistent", errECHConfig)
 		}
 		if binary.BigEndian.Uint16(remaining[:2]) == echConfigVersion {
+			publicName, err := echConfigPublicName(remaining[4 : 4+length])
+			if err != nil {
+				return fmt.Errorf("%w: %v", errECHConfig, err)
+			}
+			if canonicalDNSName(publicName) == canonicalDNSName(serverName) {
+				return fmt.Errorf("%w: public name does not conceal the relay hostname", errECHConfig)
+			}
 			supported++
 		}
 		remaining = remaining[4+length:]
@@ -165,6 +175,50 @@ func validateECHConfigList(list []byte) error {
 		return fmt.Errorf("%w: no configuration uses version %#04x", errECHConfig, echConfigVersion)
 	}
 	return nil
+}
+
+// echConfigPublicName parses the public_name from one supported ECHConfig body.
+// It validates every length needed to reach the field and the trailing
+// extensions vector, so diagnostics never report a name from malformed bytes.
+func echConfigPublicName(contents []byte) (string, error) {
+	// HpkeKeyConfig begins with config_id(1), kem_id(2), public_key<2>, and
+	// cipher_suites<2>, followed by maximum_name_length(1), public_name<1>,
+	// and extensions<2>.
+	cursor := 3
+	if len(contents) < cursor {
+		return "", errors.New("supported configuration header is truncated")
+	}
+	for _, field := range []string{"public key", "cipher suites"} {
+		if len(contents) < cursor+2 {
+			return "", fmt.Errorf("%s length is truncated", field)
+		}
+		size := int(binary.BigEndian.Uint16(contents[cursor : cursor+2]))
+		cursor += 2
+		if len(contents) < cursor+size {
+			return "", fmt.Errorf("%s runs past the configuration", field)
+		}
+		cursor += size
+	}
+	if len(contents) < cursor+2 {
+		return "", errors.New("public name header is truncated")
+	}
+	cursor++ // maximum_name_length
+	size := int(contents[cursor])
+	cursor++
+	if len(contents) < cursor+size {
+		return "", errors.New("public name runs past the configuration")
+	}
+	publicName := string(contents[cursor : cursor+size])
+	cursor += size
+	if len(contents) < cursor+2 {
+		return "", errors.New("extensions length is truncated")
+	}
+	extensionsLength := int(binary.BigEndian.Uint16(contents[cursor : cursor+2]))
+	cursor += 2
+	if len(contents) != cursor+extensionsLength {
+		return "", errors.New("extensions length is inconsistent")
+	}
+	return publicName, nil
 }
 
 // echPublicName returns the public_name of the first usable ECHConfig in a
@@ -191,25 +245,11 @@ func echPublicName(list []byte) string {
 		if version != echConfigVersion {
 			continue
 		}
-		// HpkeKeyConfig: config_id(1) kem_id(2) public_key<2> cipher_suites<2>,
-		// then maximum_name_length(1) and public_name<1>.
-		cursor := 3
-		for _, width := range []int{2, 2} {
-			if len(contents) < cursor+width {
-				return ""
-			}
-			cursor += width + int(binary.BigEndian.Uint16(contents[cursor:cursor+width]))
-		}
-		if len(contents) < cursor+2 {
+		publicName, err := echConfigPublicName(contents)
+		if err != nil {
 			return ""
 		}
-		cursor++
-		size := int(contents[cursor])
-		cursor++
-		if len(contents) < cursor+size {
-			return ""
-		}
-		return string(contents[cursor : cursor+size])
+		return publicName
 	}
 	return ""
 }

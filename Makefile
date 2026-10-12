@@ -8,6 +8,12 @@
 # graph of the thing that ships.
 
 GO ?= go
+# Analysis binaries must read export data produced by the same Go release.
+# Pin every recipe to the product module's declared toolchain.
+GO_TOOLCHAIN_VERSION := $(shell awk '/^go / { print $$2; exit }' go.mod)
+GOTOOLCHAIN := go$(GO_TOOLCHAIN_VERSION)
+export GOTOOLCHAIN
+
 BIN := bin
 TOOLS := tools
 COVERAGE_MIN ?= 90.0

@@ -62,6 +62,24 @@ func TestParsePinRejects(t *testing.T) {
 	}
 }
 
+func TestParsePinErrorsDoNotEchoInput(t *testing.T) {
+	secret := "bearer-token-canary-0123456789abcdef"
+	for description, raw := range map[string]string{
+		"missing prefix":        "  " + secret + "  ",
+		"unsupported algorithm": secret + ":anything",
+	} {
+		t.Run(description, func(t *testing.T) {
+			_, err := ParsePin(raw)
+			if err == nil {
+				t.Fatal("malformed pin accepted")
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatalf("error echoed the input: %v", err)
+			}
+		})
+	}
+}
+
 func TestZeroPinMatchesNothing(t *testing.T) {
 	var pin Pin
 	if !pin.IsZero() {

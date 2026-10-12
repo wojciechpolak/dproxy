@@ -85,6 +85,7 @@ var reservedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("2001:2::/48"),     // RFC 5180 benchmarking
 	netip.MustParsePrefix("2001:db8::/32"),   // RFC 3849 documentation
 	netip.MustParsePrefix("2002::/16"),       // RFC 7526 deprecated 6to4
+	netip.MustParsePrefix("fec0::/10"),       // RFC 3879 deprecated site-local space
 }
 
 // ClassifyAddress reports what an address is. IPv4-mapped IPv6 addresses are
@@ -93,6 +94,9 @@ var reservedPrefixes = []netip.Prefix{
 func ClassifyAddress(address netip.Addr) AddressClass {
 	if !address.IsValid() {
 		return AddressInvalid
+	}
+	if address.Zone() != "" {
+		return AddressNonGlobalUnicast
 	}
 	classified := address.Unmap()
 	switch {

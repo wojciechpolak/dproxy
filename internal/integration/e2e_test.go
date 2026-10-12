@@ -304,30 +304,30 @@ func TestEndToEndDisconnectsAndTimeouts(t *testing.T) {
 
 func TestEndToEndPolicyRefusalsNeverDialOrigin(t *testing.T) {
 	scenario(t, "a refused destination never reaches the resolver or the dialer")
-	topology := newTopology(t, topologyOptions{resolvedAddresses: []netip.Addr{netip.MustParseAddr("127.0.0.1")}})
-	cases := []struct {
+	for _, test := range []struct {
 		name      string
 		authority string
-		want      int
+		resolved  string
 	}{
-		{name: "host", authority: "not-allowed.e2e.test:443", want: http.StatusForbidden},
-		{name: "port", authority: testOriginHost + ":8443", want: http.StatusForbidden},
-		{name: "resolved private address", authority: testOriginHost + ":443", want: http.StatusForbidden},
-	}
-	for _, test := range cases {
+		{name: "host", authority: "not-allowed.e2e.test:443", resolved: "127.0.0.1"},
+		{name: "port", authority: testOriginHost + ":8443", resolved: "127.0.0.1"},
+		{name: "resolved private address", authority: testOriginHost + ":443", resolved: "127.0.0.1"},
+		{name: "resolved deprecated site-local address", authority: testOriginHost + ":443", resolved: "fec0::1"},
+	} {
 		t.Run(test.name, func(t *testing.T) {
+			topology := newTopology(t, topologyOptions{resolvedAddresses: []netip.Addr{netip.MustParseAddr(test.resolved)}})
 			response, conn := topology.connect(t, test.authority)
 			_ = conn.Close()
-			if response.StatusCode != test.want {
-				t.Fatalf("status = %d, want %d", response.StatusCode, test.want)
+			if response.StatusCode != http.StatusForbidden {
+				t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusForbidden)
+			}
+			if got := topology.dialer.calls.Load(); got != 0 {
+				t.Fatalf("target dialer called %d times for a refused destination", got)
+			}
+			if got := topology.origin.accepted.Load(); got != 0 {
+				t.Fatalf("origin accepted %d connections for a refused destination", got)
 			}
 		})
-	}
-	if got := topology.dialer.calls.Load(); got != 0 {
-		t.Fatalf("target dialer called %d times for refused destinations", got)
-	}
-	if got := topology.origin.accepted.Load(); got != 0 {
-		t.Fatalf("origin accepted %d connections for refused destinations", got)
 	}
 }
 

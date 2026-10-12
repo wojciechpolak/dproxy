@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -544,11 +545,42 @@ func TestServerServeAndHTTPGuardBranches(t *testing.T) {
 		}
 	}
 	running.server.draining.Store(false)
-	running.server.failures.overflow = time.Now().Add(time.Minute)
+	for range authFailureLimit {
+		running.server.failures.record("192.0.2.1")
+	}
 	blocked := httptest.NewRecorder()
 	running.server.ServeHTTP(blocked, httptest.NewRequest(http.MethodGet, TunnelPath, nil))
 	if blocked.Code != http.StatusTooManyRequests {
 		t.Fatalf("blocked session status = %d", blocked.Code)
+	}
+}
+
+func TestServerRateLimitsANewForwardedSourceAfterLimiterSaturation(t *testing.T) {
+	running := startTestServer(t, &testResolver{}, newTestDialer())
+	for index := range maxAuthSources {
+		running.server.failures.record(fmt.Sprintf("current-%d", index))
+	}
+
+	const attacker = "2606:4700::1111"
+	for range authFailureLimit {
+		running.server.failures.record(attacker)
+	}
+	blockedRequest := httptest.NewRequest(http.MethodGet, TunnelPath, nil)
+	blockedRequest.RemoteAddr = "127.0.0.1:12345"
+	blockedRequest.Header.Set("CF-Connecting-IP", attacker)
+	blocked := httptest.NewRecorder()
+	running.server.ServeHTTP(blocked, blockedRequest)
+	if blocked.Code != http.StatusTooManyRequests {
+		t.Fatalf("saturated limiter status = %d, want 429", blocked.Code)
+	}
+
+	unrelatedRequest := httptest.NewRequest(http.MethodGet, TunnelPath, nil)
+	unrelatedRequest.RemoteAddr = "127.0.0.1:12345"
+	unrelatedRequest.Header.Set("CF-Connecting-IP", "2606:4700::2222")
+	unrelated := httptest.NewRecorder()
+	running.server.ServeHTTP(unrelated, unrelatedRequest)
+	if unrelated.Code == http.StatusTooManyRequests {
+		t.Fatal("saturated limiter blocked an unrelated forwarded source")
 	}
 }
 

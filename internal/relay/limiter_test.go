@@ -42,6 +42,37 @@ func TestAuthFailureLimiterBlocksAndResets(t *testing.T) {
 	}
 }
 
+func TestAuthFailureLimiterMaintainsOrderAcrossRemovalAndExpiry(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	limiter := newAuthFailureLimiter()
+	limiter.now = func() time.Time { return now }
+
+	limiter.record("oldest")
+	limiter.record("middle")
+	limiter.record("newest")
+	limiter.reset("middle")
+	if limiter.oldest.source != "oldest" || limiter.oldest.newer.source != "newest" ||
+		limiter.newest.source != "newest" || limiter.newest.older.source != "oldest" {
+		t.Fatal("removing a middle entry broke the attribution order")
+	}
+
+	limiter.reset("newest")
+	if limiter.oldest != limiter.newest || limiter.oldest.source != "oldest" {
+		t.Fatal("removing the newest entry did not leave the oldest entry linked")
+	}
+
+	now = now.Add(authFailureWindow)
+	limiter.record("oldest")
+	if entry := limiter.entries["oldest"]; entry.count != 1 || !entry.start.Equal(now) {
+		t.Fatalf("expired entry restarted as %+v, want a fresh one-failure window", entry)
+	}
+	limiter.record("next")
+	limiter.reset("oldest")
+	if limiter.oldest != limiter.newest || limiter.oldest.source != "next" {
+		t.Fatal("removing the oldest entry did not promote the next entry")
+	}
+}
+
 func TestAuthenticationSourceTrustsTunnelHeaderOnlyFromPrivatePeer(t *testing.T) {
 	privateRequest := httptest.NewRequest("GET", "http://dproxy/v1/tunnel", nil)
 	privateRequest.RemoteAddr = "127.0.0.1:12345"
@@ -67,36 +98,72 @@ func TestAuthenticationSourceTrustsTunnelHeaderOnlyFromPrivatePeer(t *testing.T)
 func TestAuthFailureLimiterBoundsTrackedSources(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 
-	t.Run("expired entries are pruned", func(t *testing.T) {
+	t.Run("one expired entry is evicted per insertion", func(t *testing.T) {
 		limiter := newAuthFailureLimiter()
 		limiter.now = func() time.Time { return now }
 		for index := range maxAuthSources {
-			limiter.entries[fmt.Sprintf("expired-%d", index)] = authFailureEntry{
-				count: 1,
-				start: now.Add(-authFailureWindow),
-			}
+			limiter.record(fmt.Sprintf("expired-%d", index))
 		}
+		now = now.Add(authFailureWindow)
 		limiter.record("current")
-		if len(limiter.entries) != 1 || limiter.entries["current"].count != 1 {
-			t.Fatalf("entries after pruning = %d, want only the current source", len(limiter.entries))
+		if len(limiter.entries) != maxAuthSources || limiter.entries["current"].count != 1 {
+			t.Fatalf("entries after eviction = %d, want the fixed bound", len(limiter.entries))
 		}
-		if !limiter.overflow.IsZero() {
-			t.Fatalf("pruning triggered overflow until %v", limiter.overflow)
+		if _, retained := limiter.entries["expired-0"]; retained {
+			t.Fatal("oldest expired attribution was not evicted")
+		}
+		if _, retained := limiter.entries["expired-1"]; !retained {
+			t.Fatal("one insertion performed more than one eviction")
 		}
 	})
 
-	t.Run("a full current set fails closed", func(t *testing.T) {
+	t.Run("a full current set evicts old attribution without a global block", func(t *testing.T) {
 		limiter := newAuthFailureLimiter()
 		limiter.now = func() time.Time { return now }
 		for index := range maxAuthSources {
-			limiter.entries[fmt.Sprintf("current-%d", index)] = authFailureEntry{count: 1, start: now}
+			limiter.record(fmt.Sprintf("current-%d", index))
 		}
 		limiter.record("overflowing-source")
-		if _, added := limiter.entries["overflowing-source"]; added {
-			t.Fatal("source was added beyond the limiter's bound")
+		if len(limiter.entries) != maxAuthSources {
+			t.Fatalf("entries = %d, want the fixed bound %d", len(limiter.entries), maxAuthSources)
 		}
-		if !limiter.blocked("untracked-source") {
-			t.Fatal("overflow did not temporarily fail closed")
+		if _, added := limiter.entries["overflowing-source"]; !added {
+			t.Fatal("new source was not tracked after saturation")
+		}
+		if _, retained := limiter.entries["current-0"]; retained {
+			t.Fatal("oldest attribution was not evicted")
+		}
+		for range authFailureLimit - 1 {
+			limiter.record("overflowing-source")
+		}
+		if !limiter.blocked("overflowing-source") {
+			t.Fatal("new source was not rate-limited after saturation")
+		}
+		if limiter.blocked("untracked-source") {
+			t.Fatal("map saturation globally blocked an unrelated source")
 		}
 	})
+}
+
+func TestRotatingForwardedAddressesCannotTriggerAGlobalBlock(t *testing.T) {
+	limiter := newAuthFailureLimiter()
+	limiter.now = func() time.Time { return time.Unix(1_700_000_000, 0) }
+	request := httptest.NewRequest("GET", "http://dproxy/v1/tunnel", nil)
+	request.RemoteAddr = "127.0.0.1:12345"
+	for index := range maxAuthSources + 1 {
+		request.Header.Set("CF-Connecting-IP", fmt.Sprintf("2001:db8::%x", index+1))
+		limiter.record(authenticationSource(request))
+	}
+	request.Header.Set("CF-Connecting-IP", "2606:4700::1111")
+	attacker := authenticationSource(request)
+	for range authFailureLimit {
+		limiter.record(attacker)
+	}
+	if !limiter.blocked(attacker) {
+		t.Fatal("a stable forwarded identity escaped the limit after saturation")
+	}
+	request.Header.Set("CF-Connecting-IP", "2606:4700::2222")
+	if legitimate := authenticationSource(request); limiter.blocked(legitimate) {
+		t.Fatal("rotating forwarded identities globally blocked an unrelated source")
+	}
 }

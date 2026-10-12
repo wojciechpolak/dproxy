@@ -24,6 +24,7 @@ func TestTCPDialerRejectsUnsafeInputsBeforeDialing(t *testing.T) {
 	}{
 		{"no addresses", nil, 443, time.Second, "public"},
 		{"private address", []netip.Addr{netip.MustParseAddr("10.0.0.1")}, 443, time.Second, "public"},
+		{"deprecated site-local address", []netip.Addr{netip.MustParseAddr("fec0::1")}, 443, time.Second, "public"},
 		{"mixed addresses", []netip.Addr{netip.MustParseAddr("1.1.1.1"), netip.MustParseAddr("127.0.0.1")}, 443, time.Second, "public"},
 		{"wrong port", []netip.Addr{netip.MustParseAddr("1.1.1.1")}, 80, time.Second, "port"},
 		{"zero timeout", []netip.Addr{netip.MustParseAddr("1.1.1.1")}, 443, 0, "timeout"},

@@ -119,6 +119,14 @@ func verifyTransport(info *TransportInfo, echRequired bool) error {
 	if echRequired && !info.ECHAccepted {
 		return Fail(FailureECHRejected, ErrNoFallback)
 	}
+	if echRequired && info.ECHPublicName == "" {
+		return Fail(FailureECHUnavailable,
+			fmt.Errorf("%w: accepted public name is unavailable", errECHConfig))
+	}
+	if echRequired && canonicalDNSName(info.ECHPublicName) == canonicalDNSName(info.ServerName) {
+		return Fail(FailureECHUnavailable,
+			fmt.Errorf("%w: public name does not conceal the relay hostname", errECHConfig))
+	}
 	return nil
 }
 

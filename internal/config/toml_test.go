@@ -290,8 +290,9 @@ spread   = [
 }
 
 func TestTOMLRejectsMalformedArrays(t *testing.T) {
+	secret := "bearer-token-canary-0123456789abcdef"
 	document := mustParse(t, `
-unquoted = [api.openai.com]
+unquoted = [`+secret+`]
 scalar   = "not an array"
 nested   = [["a"]]
 gap      = ["a", , "b"]
@@ -301,6 +302,8 @@ gap      = ["a", , "b"]
 			var values []string
 			if err := document.applyStrings(key, &values); err == nil {
 				t.Fatalf("applyStrings(%s) = %q, want error", key, values)
+			} else if strings.Contains(err.Error(), secret) {
+				t.Fatalf("applyStrings(%s) echoed an unquoted value: %v", key, err)
 			}
 		})
 	}

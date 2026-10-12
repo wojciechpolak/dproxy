@@ -52,7 +52,7 @@ remote TCP connection. v1 does not multiplex connections.
 
 | Part              | Technology                                                                                               |
 |-------------------|----------------------------------------------------------------------------------------------------------|
-| Implementation    | Go 1.26.6, with no third-party modules in the shipped binary                                             |
+| Implementation    | Go 1.26.9, with no third-party modules in the shipped binary                                             |
 | Local interface   | HTTP/1.1 `CONNECT` through `HTTPS_PROXY`                                                                 |
 | Outer transport   | In-process DoH, DNS HTTPS records, TLS 1.3, mandatory ECH, and WSS                                       |
 | Private channel   | Inner TLS 1.3 with a pinned Ed25519 server identity                                                      |
@@ -91,7 +91,7 @@ and the threats v1 does not try to solve.
 
 ## Requirements
 
-- macOS, Linux, or Windows on arm64 or amd64 for a prebuilt binary, or Go 1.26.6
+- macOS, Linux, or Windows on arm64 or amd64 for a prebuilt binary, or Go 1.26.9
   to build it
 - Docker and an ECH-capable TLS/WSS front end for the remote relay deployment
 
@@ -166,9 +166,9 @@ The binary is written to `bin/dproxy`.
 ## Deploy the remote relay
 
 The v1 relay is a non-root Go container behind a WSS front end. The front end
-must publish ECH in DNS, accept ECH with TLS 1.3, present a publicly trusted
-certificate, support WebSockets, and forward `/v1/tunnel` to dproxy over
-HTTP/1.1.
+must publish ECH in DNS with public names distinct from the relay hostname,
+accept ECH with TLS 1.3, present a publicly trusted certificate, support
+WebSockets, and forward `/v1/tunnel` to dproxy over HTTP/1.1.
 
 The published remote-server image supports Linux on arm64 and amd64. Pull the
 latest stable release with:

@@ -7,6 +7,8 @@ a public WSS front end with all of these properties:
 - the relay hostname publishes a DNS `HTTPS` record containing an ECH
   configuration;
 - the outer connection accepts ECH and negotiates TLS 1.3;
+- every supported ECH configuration uses a public name distinct from the relay
+  hostname;
 - the front end presents a publicly trusted certificate for the relay hostname;
 - it accepts WebSocket upgrades at `/v1/tunnel` without redirects;
 - it forwards the WebSocket to dproxy over HTTP/1.1;
@@ -200,8 +202,16 @@ self-managed TLS endpoint. Keep its plain HTTP listener on a private network.
 Route only `/v1/tunnel` to it with HTTP/1.1 WebSocket forwarding and keep
 `/healthz` private.
 
+dproxy uses `CF-Connecting-IP` for per-client authentication-failure limits when
+the direct peer is private or loopback. Every supported ingress must remove any
+client-supplied value and set this header from its authenticated connection
+metadata. A public, multi-client ingress that cannot do that is unsupported:
+stripping the header would collapse all of its clients onto the direct proxy
+address and let one client consume their shared failure allowance.
+
 The public endpoint must satisfy every transport requirement listed above. It is
 not enough to enable ordinary TLS or publish an HTTPS certificate. The hostname
-must publish a usable ECH configuration, the endpoint must accept ECH, and the
-completed connection must negotiate TLS 1.3. Run `dproxy test` against the final
-public `wss://` URL before sending application traffic.
+must publish a usable ECH configuration whose supported public names differ from
+the relay hostname, the endpoint must accept ECH, and the completed connection
+must negotiate TLS 1.3. Run `dproxy test` against the final public `wss://` URL
+before sending application traffic.

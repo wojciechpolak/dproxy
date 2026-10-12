@@ -80,10 +80,10 @@ func ParsePin(raw string) (Pin, error) {
 	}
 	algorithm, encoded, found := strings.Cut(trimmed, ":")
 	if !found {
-		return Pin{}, fmt.Errorf("pin %q has no algorithm prefix (want %q)", trimmed, "sha256:<digest>")
+		return Pin{}, fmt.Errorf("pin has no algorithm prefix (want %q)", "sha256:<digest>")
 	}
 	if PinAlgorithm(strings.ToLower(algorithm)) != PinSHA256 {
-		return Pin{}, fmt.Errorf("unsupported pin algorithm %q (want %q)", algorithm, PinSHA256)
+		return Pin{}, fmt.Errorf("unsupported pin algorithm (want %q)", PinSHA256)
 	}
 	decoded, err := decodeDigest(encoded)
 	if err != nil {

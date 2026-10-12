@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
@@ -238,23 +239,34 @@ func TestConnectReportsWhenNoAddressAccepts(t *testing.T) {
 }
 
 func TestDialRejectsANonPublicRelayAddress(t *testing.T) {
-	list := testECHConfigList(t, "cloudflare-ech.com")
-	resolver, _ := newStubResolver(t, zone{
-		ask(relayName, typeHTTPS): {answer(relayName, typeHTTPS, httpsData(t, 1, "", svcParam(svcParamECH, list)))},
-		ask(relayName, typeA):     {answer(relayName, typeA, addressData(t, "127.0.0.1"))},
-	})
-	dialer := newDialer(resolver, nil, config.ECHRequired)
+	for description, testCase := range map[string]struct {
+		qtype   dnsType
+		address string
+		class   string
+	}{
+		"loopback":              {qtype: typeA, address: "127.0.0.1", class: "loopback"},
+		"deprecated site-local": {qtype: typeAAAA, address: "fec0::1", class: "reserved"},
+	} {
+		t.Run(description, func(t *testing.T) {
+			list := testECHConfigList(t, "cloudflare-ech.com")
+			resolver, _ := newStubResolver(t, zone{
+				ask(relayName, typeHTTPS):      {answer(relayName, typeHTTPS, httpsData(t, 1, "", svcParam(svcParamECH, list)))},
+				ask(relayName, testCase.qtype): {answer(relayName, testCase.qtype, addressData(t, testCase.address))},
+			})
+			dialer := newDialer(resolver, nil, config.ECHRequired)
 
-	conn, _, err := dialer.DialHTTPS(t.Context(), relayName)
-	if err == nil {
-		_ = conn.Close()
-		t.Fatal("a relay resolving to loopback was dialed")
-	}
-	if reason := ReasonOf(err); reason != FailureAddressRejected {
-		t.Fatalf("reason = %s, want address-rejected", reason)
-	}
-	if got := err.Error(); !contains(got, "loopback") {
-		t.Errorf("err = %q, want the class named", got)
+			conn, _, err := dialer.DialHTTPS(t.Context(), relayName)
+			if err == nil {
+				_ = conn.Close()
+				t.Fatalf("a relay resolving to %s was dialed", description)
+			}
+			if reason := ReasonOf(err); reason != FailureAddressRejected {
+				t.Fatalf("reason = %s, want address-rejected", reason)
+			}
+			if got := err.Error(); !contains(got, testCase.class) {
+				t.Errorf("err = %q, want class %q", got, testCase.class)
+			}
+		})
 	}
 }
 
@@ -308,6 +320,28 @@ func TestDialRequiresAUsableECHConfig(t *testing.T) {
 	}
 }
 
+func TestDialRejectsAnECHPublicNameThatExposesTheRelay(t *testing.T) {
+	list := combineECHConfigLists(
+		testECHConfigList(t, "cloudflare-ech.com"),
+		testECHConfigList(t, relayName),
+	)
+	resolver, _ := newStubResolver(t, zone{
+		ask(relayName, typeHTTPS): {answer(relayName, typeHTTPS,
+			httpsData(t, 1, "", svcParam(svcParamECH, list)))},
+		ask(relayName, typeA): {answer(relayName, typeA, addressData(t, "203.0.113.10"))},
+	})
+	dialer := newDialer(resolver, nil, config.ECHRequired)
+
+	conn, _, err := dialer.DialHTTPS(t.Context(), relayName)
+	if err == nil {
+		_ = conn.Close()
+		t.Fatal("an ECH public name that exposes the relay was accepted")
+	}
+	if reason := ReasonOf(err); reason != FailureECHUnavailable {
+		t.Fatalf("reason = %s, want ech-unavailable", reason)
+	}
+}
+
 func TestDialWithoutAResolver(t *testing.T) {
 	dialer := &SecureDialer{ECH: config.ECHRequired}
 	if _, _, err := dialer.DialHTTPS(context.Background(), relayName); ReasonOf(err) != FailureDoH {
@@ -326,6 +360,28 @@ func TestVerifyTransportEnforcesTheInvariants(t *testing.T) {
 	}
 	if err := verifyTransport(noECH, false); err != nil {
 		t.Errorf("err = %v, want acceptance when ECH is not required", err)
+	}
+	unknownPublicName := &TransportInfo{Version: tls.VersionTLS13, ServerName: relayName, ECHAccepted: true}
+	if err := verifyTransport(unknownPublicName, true); ReasonOf(err) != FailureECHUnavailable {
+		t.Errorf("err = %v, want ech-unavailable", err)
+	}
+	revealing := &TransportInfo{
+		Version:       tls.VersionTLS13,
+		ServerName:    relayName,
+		ECHAccepted:   true,
+		ECHPublicName: strings.ToUpper(relayName),
+	}
+	if err := verifyTransport(revealing, true); ReasonOf(err) != FailureECHUnavailable {
+		t.Errorf("err = %v, want ech-unavailable", err)
+	}
+	concealing := &TransportInfo{
+		Version:       tls.VersionTLS13,
+		ServerName:    relayName,
+		ECHAccepted:   true,
+		ECHPublicName: "cloudflare-ech.com",
+	}
+	if err := verifyTransport(concealing, true); err != nil {
+		t.Errorf("err = %v, want a distinct ECH public name to be accepted", err)
 	}
 }
 

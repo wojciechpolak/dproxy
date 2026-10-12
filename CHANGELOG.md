@@ -7,6 +7,23 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- Reject ECH configurations whose supported public name matches the relay
+  hostname, so mandatory ECH cannot expose that hostname in outer SNI.
+- Keep authentication-failure limiting bounded and active at capacity by
+  evicting the oldest source instead of blocking the whole relay or dropping a
+  new source's failures.
+- Reject deprecated IPv6 site-local addresses and zone-scoped addresses as
+  non-global destinations.
+- Redact malformed pin and TOML array values from configuration errors.
+- Upgrade the build and runtime baseline to Go 1.26.9.
+
+### Fixed
+
+- Pin Make recipes to the Go version declared in `go.mod`, preventing analyzer
+  export-data incompatibilities when the host Go version is newer.
+
 ## [1.2.0] - 2026-09-14
 
 ### Added

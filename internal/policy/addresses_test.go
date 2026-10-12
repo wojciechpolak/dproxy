@@ -64,6 +64,10 @@ func TestClassifyAddress(t *testing.T) {
 		{"2001:2::1", AddressReserved},   // benchmarking
 		{"2001:db8::1", AddressReserved}, // documentation
 		{"2002::1", AddressReserved},     // deprecated 6to4
+		{"fec0::", AddressReserved},      // deprecated site-local lower boundary
+		{"fedc:ba98::1", AddressReserved},
+		{"feff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", AddressReserved}, // upper boundary
+		{"fec0::1%eth0", AddressNonGlobalUnicast},                    // scoped forms never dial
 	}
 	for _, tc := range cases {
 		t.Run(tc.address, func(t *testing.T) {

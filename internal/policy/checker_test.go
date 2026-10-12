@@ -129,6 +129,7 @@ func TestCheckerResolveRejectsNonPublicAnswers(t *testing.T) {
 		{"IPv6 loopback", []string{"::1"}},
 		{"RFC1918", []string{"10.1.2.3"}},
 		{"unique local", []string{"fd00::1"}},
+		{"deprecated site-local", []string{"fec0::1"}},
 		{"link-local metadata", []string{"169.254.169.254"}},
 		{"unspecified", []string{"0.0.0.0"}},
 		{"multicast", []string{"239.255.255.250"}},

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -91,7 +92,7 @@ func TestParseHTTPSRecordRejectsMalformedRecords(t *testing.T) {
 
 func TestValidateECHConfigList(t *testing.T) {
 	valid := testECHConfigList(t, "cloudflare-ech.com")
-	if err := validateECHConfigList(valid); err != nil {
+	if err := validateECHConfigList(valid, relayName); err != nil {
 		t.Fatalf("validateECHConfigList: %v", err)
 	}
 
@@ -114,13 +115,57 @@ func TestValidateECHConfigList(t *testing.T) {
 	}
 	for description, list := range cases {
 		t.Run(description, func(t *testing.T) {
-			if err := validateECHConfigList(list); err == nil {
+			if err := validateECHConfigList(list, relayName); err == nil {
 				t.Fatal("an unusable ECHConfigList was accepted")
 			} else if !errors.Is(err, errECHConfig) {
 				t.Errorf("err = %v, want errECHConfig", err)
 			}
 		})
 	}
+}
+
+func TestValidateECHConfigListRejectsRelayPublicName(t *testing.T) {
+	for description, testCase := range map[string]struct {
+		list       []byte
+		serverName string
+	}{
+		"exact match": {
+			list:       testECHConfigList(t, relayName),
+			serverName: relayName,
+		},
+		"case-insensitive match": {
+			list:       testECHConfigList(t, strings.ToUpper(relayName)),
+			serverName: relayName,
+		},
+		"rooted relay name": {
+			list:       testECHConfigList(t, relayName),
+			serverName: relayName + ".",
+		},
+		"revealing later configuration": {
+			list: combineECHConfigLists(
+				testECHConfigList(t, "cloudflare-ech.com"),
+				testECHConfigList(t, relayName),
+			),
+			serverName: relayName,
+		},
+	} {
+		t.Run(description, func(t *testing.T) {
+			if err := validateECHConfigList(testCase.list, testCase.serverName); err == nil {
+				t.Fatal("an ECHConfigList that exposes the relay name was accepted")
+			} else if !errors.Is(err, errECHConfig) {
+				t.Errorf("err = %v, want errECHConfig", err)
+			}
+		})
+	}
+}
+
+func combineECHConfigLists(lists ...[]byte) []byte {
+	combined := []byte{0, 0}
+	for _, list := range lists {
+		combined = append(combined, list[2:]...)
+	}
+	binary.BigEndian.PutUint16(combined[:2], uint16(len(combined)-2))
+	return combined
 }
 
 func TestECHPublicName(t *testing.T) {

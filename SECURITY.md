@@ -38,7 +38,8 @@ terminates the original application TLS connection and sees its contents.
 - **Application TLS stays opaque.** dproxy must not terminate, decrypt, inspect,
   log, or rewrite the application's TLS session.
 - **The outer transport fails closed.** The client uses in-process DoH, requires
-  TLS 1.3 and accepted ECH, validates the public certificate, and rejects
+  TLS 1.3 and accepted ECH, requires every supported ECH public name to differ
+  from the relay hostname, validates the public certificate, and rejects
   redirects. It never falls back to the operating-system resolver, TLS 1.2, or a
   connection without ECH.
 - **The private channel is pinned.** Local and remote dproxy establish inner TLS

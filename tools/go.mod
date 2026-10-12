@@ -1,6 +1,6 @@
 module github.com/wojciechpolak/dproxy/tools
 
-go 1.26.6
+go 1.26.9
 
 tool (
 	github.com/Kunde21/markdownfmt/v3/cmd/markdownfmt

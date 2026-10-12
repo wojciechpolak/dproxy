@@ -79,13 +79,28 @@ func TestLoadClientRequiresServerAndPin(t *testing.T) {
 }
 
 func TestLoadClientRejectsBadPin(t *testing.T) {
+	secret := "bearer-token-canary-0123456789abcdef"
 	_, err := loadClient(t,
 		"--server", "wss://dproxy.example.com/v1/tunnel",
-		"--server-pin", "deadbeef",
+		"--server-pin", secret,
 		"--token-file", "/tmp/token",
 	)
 	if err == nil || !strings.Contains(err.Error(), "algorithm prefix") {
 		t.Fatalf("Load() = %v, want an unprefixed-pin error", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("Load() echoed the malformed pin: %v", err)
+	}
+
+	configPath := filepath.Join(t.TempDir(), "client.toml")
+	write(t, configPath, `
+server = "wss://dproxy.example.com/v1/tunnel"
+server_pin = "`+secret+`"
+token_file = "/tmp/token"
+`)
+	_, err = loadClient(t, "--config", configPath)
+	if err == nil || strings.Contains(err.Error(), secret) {
+		t.Fatalf("TOML malformed pin error = %v", err)
 	}
 }
 

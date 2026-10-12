@@ -70,7 +70,7 @@ func (d *SecureDialer) DialPort(ctx context.Context, hostname string, port uint1
 			return nil, nil, Fail(FailureECHUnavailable,
 				fmt.Errorf("the HTTPS record for %s carries no ECH configuration: %w", hostname, ErrNoFallback))
 		}
-		if err := validateECHConfigList(resolution.ECHConfig); err != nil {
+		if err := validateECHConfigList(resolution.ECHConfig, hostname); err != nil {
 			return nil, nil, Fail(FailureECHUnavailable, err)
 		}
 	}

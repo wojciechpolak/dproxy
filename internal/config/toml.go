@@ -358,7 +358,7 @@ func parseStringArray(raw string) ([]string, error) {
 	for _, element := range elements {
 		value, err := unquote(element)
 		if err != nil {
-			return nil, fmt.Errorf("array values must be quoted strings, got %s", element)
+			return nil, fmt.Errorf("array values must be quoted strings")
 		}
 		values = append(values, value)
 	}

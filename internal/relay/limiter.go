@@ -19,34 +19,35 @@ const (
 )
 
 type authFailureEntry struct {
-	count int
-	start time.Time
+	source string
+	count  int
+	start  time.Time
+	older  *authFailureEntry
+	newer  *authFailureEntry
 }
 
 type authFailureLimiter struct {
-	mu       sync.Mutex
-	entries  map[string]authFailureEntry
-	overflow time.Time
-	now      func() time.Time
+	mu      sync.Mutex
+	entries map[string]*authFailureEntry
+	oldest  *authFailureEntry
+	newest  *authFailureEntry
+	now     func() time.Time
 }
 
 func newAuthFailureLimiter() *authFailureLimiter {
-	return &authFailureLimiter{entries: make(map[string]authFailureEntry), now: time.Now}
+	return &authFailureLimiter{entries: make(map[string]*authFailureEntry), now: time.Now}
 }
 
 func (l *authFailureLimiter) blocked(source string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
-	if now.Before(l.overflow) {
-		return true
-	}
 	entry, found := l.entries[source]
 	if !found {
 		return false
 	}
 	if now.Sub(entry.start) >= authFailureWindow {
-		delete(l.entries, source)
+		l.remove(entry)
 		return false
 	}
 	return entry.count >= authFailureLimit
@@ -57,32 +58,56 @@ func (l *authFailureLimiter) record(source string) {
 	defer l.mu.Unlock()
 	now := l.now()
 	entry, found := l.entries[source]
-	if !found || now.Sub(entry.start) >= authFailureWindow {
+	if found && now.Sub(entry.start) >= authFailureWindow {
+		l.remove(entry)
+		found = false
+	}
+	if !found {
 		if len(l.entries) >= maxAuthSources {
-			l.prune(now)
-			if len(l.entries) >= maxAuthSources {
-				l.overflow = now.Add(authFailureWindow)
-				return
-			}
+			// Evict one attribution instead of blocking the whole relay or
+			// dropping the new failure. The list is ordered by window start,
+			// so this is constant time and retains the newest source.
+			l.remove(l.oldest)
 		}
-		entry = authFailureEntry{start: now}
+		entry = l.insert(source, now)
 	}
 	entry.count++
-	l.entries[source] = entry
 }
 
 func (l *authFailureLimiter) reset(source string) {
 	l.mu.Lock()
-	delete(l.entries, source)
+	if entry, found := l.entries[source]; found {
+		l.remove(entry)
+	}
 	l.mu.Unlock()
 }
 
-func (l *authFailureLimiter) prune(now time.Time) {
-	for source, entry := range l.entries {
-		if now.Sub(entry.start) >= authFailureWindow {
-			delete(l.entries, source)
-		}
+func (l *authFailureLimiter) insert(source string, now time.Time) *authFailureEntry {
+	entry := &authFailureEntry{source: source, start: now, older: l.newest}
+	if l.newest == nil {
+		l.oldest = entry
+	} else {
+		l.newest.newer = entry
 	}
+	l.newest = entry
+	l.entries[source] = entry
+	return entry
+}
+
+func (l *authFailureLimiter) remove(entry *authFailureEntry) {
+	if entry.older == nil {
+		l.oldest = entry.newer
+	} else {
+		entry.older.newer = entry.newer
+	}
+	if entry.newer == nil {
+		l.newest = entry.older
+	} else {
+		entry.newer.older = entry.older
+	}
+	delete(l.entries, entry.source)
+	entry.older = nil
+	entry.newer = nil
 }
 
 // authenticationSource prefers Cloudflare's client address only when the

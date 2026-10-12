@@ -1,3 +1,3 @@
 module github.com/wojciechpolak/dproxy
 
-go 1.26.6
+go 1.26.9
